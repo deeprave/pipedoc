@@ -1,0 +1,102 @@
+# Ruff configuration for pipedoc
+# Standard but not overly strict linting and formatting rules
+
+# Exclude common directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+# Set the maximum line length to match Black's default
+line-length = 88
+
+# Assume Python 3.8+ (matching your project requirements)
+target-version = "py38"
+
+[lint]
+# Enable a reasonable set of rules
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "SIM", # flake8-simplify
+    "RUF", # Ruff-specific rules
+]
+
+# Disable some overly strict rules
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function calls in argument defaults
+    "B904",   # Within an `except` clause, raise exceptions with `raise ... from err`
+    "N806",   # Variable in function should be lowercase
+    "N803",   # Argument name should be lowercase
+    "SIM108", # Use ternary operator instead of if-else-block
+    "UP007",  # Use `X | Y` for type annotations (not available in Python 3.8)
+]
+
+# Allow fix for all enabled rules (when using --fix)
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Use spaces around operators
+indent-style = "space"
+
+# Respect magic trailing commas
+skip-magic-trailing-comma = false
+
+# Automatically detect the appropriate line ending
+line-ending = "auto"
+
+[lint.per-file-ignores]
+# Tests can use assert statements and have longer lines
+"tests/*" = ["S101", "E501"]
+
+# CLI modules can have longer lines for help text
+"**/cli.py" = ["E501"]
+
+[lint.isort]
+# Configure import sorting to match common Python practices
+known-first-party = ["pipedoc"]
+force-single-line = false
+force-sort-within-sections = false
+single-line-exclusions = ["typing"]
+
+[lint.mccabe]
+# Set maximum complexity (not too strict)
+max-complexity = 12
+
+[lint.pep8-naming]
+# Allow some common naming patterns
+classmethod-decorators = ["classmethod"]
+staticmethod-decorators = ["staticmethod"]
