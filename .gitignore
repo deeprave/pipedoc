@@ -21,3 +21,4 @@ htmlcov/
 
 uv.toml
 .idea/
+.claude/

@@ -251,3 +251,198 @@ class TestPipeManager:
             thread_instance.start.assert_called_once()
 
         assert len(manager.threads) == 3
+
+    @patch("select.select")
+    @patch("os.close")
+    @patch("os.open")
+    def test_connection_monitor_detects_pipe_connection_attempts(self, mock_os_open, mock_os_close, mock_select):
+        """Test that connection monitor detects pipe connection attempts using select()."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        mock_pipe_fd = 42
+        mock_os_open.return_value = mock_pipe_fd
+        
+        # Simulate select() detecting a connection attempt
+        # First call: connection detected, second call: timeout (no more connections)
+        mock_select.side_effect = [
+            ([mock_pipe_fd], [], []),  # Connection detected
+            ([], [], [])  # Timeout - no more connections
+        ]
+        
+        # Track if connection was detected
+        connection_detected = []
+        
+        def mock_spawn_worker():
+            connection_detected.append(True)
+        
+        # Mock the worker spawning method that doesn't exist yet
+        manager._spawn_worker = mock_spawn_worker
+        
+        # Act
+        # This method doesn't exist yet - we'll implement it next
+        manager._monitor_connections_once()
+        
+        # Assert
+        # Should have opened pipe in non-blocking mode for monitoring
+        mock_os_open.assert_called_once_with("/tmp/test_pipe", os.O_RDONLY | os.O_NONBLOCK)
+        
+        # Should have called select to monitor the pipe
+        mock_select.assert_called_once_with([mock_pipe_fd], [], [], 1.0)
+        
+        # Should have detected the connection and spawned a worker
+        assert len(connection_detected) == 1
+        
+        # Should have properly closed the file descriptor
+        mock_os_close.assert_called_once_with(mock_pipe_fd)
+
+    @patch("threading.Thread")
+    def test_worker_thread_only_created_when_client_connects(self, mock_thread):
+        """Test that worker threads are only created reactively when clients connect."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        mock_thread_instance = MagicMock()
+        mock_thread.return_value = mock_thread_instance
+        
+        # Act - call spawn worker (this should create exactly one thread)
+        manager._spawn_worker_reactive("test content")
+        
+        # Assert
+        # Should have created exactly one thread
+        mock_thread.assert_called_once_with(
+            target=manager.serve_client,
+            args=(1, "test content"),
+            daemon=True
+        )
+        
+        # Should have started the thread
+        mock_thread_instance.start.assert_called_once()
+        
+        # Should NOT have added thread to the unbounded threads list
+        # (this verifies we're not using the old preemptive approach)
+        assert len(manager.threads) == 0
+
+    @patch("threading.Thread")
+    def test_new_worker_spawned_only_after_current_worker_busy(self, mock_thread):
+        """Test that exactly one replacement worker is spawned when current worker becomes busy."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        mock_thread_instances = [MagicMock(), MagicMock()]
+        mock_thread.side_effect = mock_thread_instances
+        
+        # Act - start reactive serving which should create initial worker
+        manager._start_reactive_serving("test content")
+        
+        # Simulate the worker becoming busy (this should spawn replacement)
+        manager._worker_became_busy()
+        
+        # Assert
+        # Should have created exactly 2 threads: initial + replacement
+        assert mock_thread.call_count == 2
+        
+        # Both threads should have been started
+        mock_thread_instances[0].start.assert_called_once()
+        mock_thread_instances[1].start.assert_called_once()
+        
+        # Should maintain exactly one ready worker at all times
+        assert manager._get_ready_worker_count() == 1
+
+    @patch("threading.Thread")
+    def test_thread_cleanup_prevents_resource_leaks(self, mock_thread):
+        """Test that thread cleanup prevents resource leaks through proper worker management."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Create multiple mock threads to simulate multiple worker lifecycles
+        mock_thread_instances = [MagicMock() for _ in range(5)]
+        mock_thread.side_effect = mock_thread_instances
+        
+        # Act - simulate multiple worker creation and completion cycles
+        # Start initial worker
+        manager._start_reactive_serving("test content")
+        
+        # Simulate multiple workers becoming busy and being replaced
+        for i in range(4):
+            manager._worker_became_busy()
+        
+        # Simulate workers completing and deregistering themselves
+        for i in range(3):
+            manager._worker_completed()
+        
+        # Perform cleanup
+        manager._cleanup_reactive_workers()
+        
+        # Assert
+        # Should have created 5 threads total (1 initial + 4 replacements)
+        assert mock_thread.call_count == 5
+        
+        # All threads should have been started
+        for thread_instance in mock_thread_instances:
+            thread_instance.start.assert_called_once()
+        
+        # Should NOT be using the old unbounded threads list for tracking
+        # (The old implementation would have 5 threads in self.threads)
+        assert len(manager.threads) == 0
+        
+        # Should maintain proper active worker count after cleanup
+        # (1 worker remains as the ready worker)
+        assert manager._get_active_worker_count() == 1
+        
+        # Should have exactly one ready worker remaining
+        assert manager._get_ready_worker_count() == 1
+
+    @patch("threading.Thread")
+    def test_system_recovers_from_worker_thread_failures(self, mock_thread):
+        """Test that system recovers from worker thread failures automatically."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Create mock threads - some will fail
+        # We need extra threads because failed starts trigger retries
+        mock_thread_instances = [MagicMock() for _ in range(6)]
+        mock_thread.side_effect = mock_thread_instances
+        
+        # Simulate the second and third threads failing on start
+        mock_thread_instances[1].start.side_effect = RuntimeError("Thread failed to start")
+        mock_thread_instances[2].start.side_effect = OSError("Resource unavailable")
+        
+        # Act - start reactive serving
+        manager._start_reactive_serving("test content")
+        
+        # Simulate first worker encountering an error and failing
+        manager._worker_failed(RuntimeError("Worker encountered error"))
+        
+        # Simulate another worker failure
+        manager._worker_failed(OSError("Pipe error"))
+        
+        # System should have attempted recovery by spawning replacements
+        
+        # Assert
+        # Should have created 6 threads total due to recovery attempts:
+        # 1 initial (success) -> 1st failure triggers thread 2 (fails) -> 
+        # retry with thread 3 (fails) -> retry with thread 4 (success) ->
+        # 2nd failure triggers thread 5 (success)
+        assert mock_thread.call_count >= 5
+        
+        # First thread should have started successfully
+        mock_thread_instances[0].start.assert_called_once()
+        
+        # Later threads should have been attempted as recovery
+        assert mock_thread_instances[3].start.called or mock_thread_instances[4].start.called
+        
+        # Should have recovered and maintained exactly one ready worker
+        assert manager._get_ready_worker_count() == 1
+        
+        # Should have proper error tracking
+        assert manager._get_worker_failure_count() == 2  # 2 execution failures
+        assert manager._get_worker_start_failure_count() == 2  # 2 start failures during recovery
+        assert manager._get_total_failure_count() == 4  # Total: 2 + 2 = 4
+        
+        # System should still be running despite failures
+        assert manager.is_running() is True
