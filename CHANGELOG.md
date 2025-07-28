@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unknown] - [Unknown]
+
+### Changed
+- **Major Architecture Refactor**: Transformed monolithic PipeManager (735 lines) into component-based architecture following Single Responsibility Principle
+- **Component Design**: Split functionality into focused components: MetricsCollector, WorkerPool, PipeResource, ConnectionManager, and orchestrating PipeManager
+- **Enhanced Thread Management**: Replaced manual thread handling with enhanced ThreadPoolExecutor wrapper providing better capacity management and error recovery
+- **Race Condition Prevention**: Implemented always-ready writer pattern through ConnectionManager to eliminate client connection race conditions
+- **Improved Error Handling**: Added component-level error isolation preventing system-wide failures
+- **Test Architecture**: Streamlined from 40 legacy tests to 20 focused tests covering component functionality and integration
+- **Performance Optimisation**: Reduced component communication overhead and optimised thread pool utilisation
+
+### Added
+- **ARCHITECTURE.md**: Comprehensive technical documentation covering system design, component responsibilities, and architecture decisions
+- **Component Test Suites**: Individual test files for each component ensuring isolated testing and better coverage
+- **Integration Test Suites**: Comprehensive testing of component interactions, error handling, and performance validation
+- **Enhanced Metrics**: Thread-safe metrics collection with detailed connection statistics and performance monitoring
+- **Connection Management**: Advanced connection lifecycle management with overload protection
+
+### Fixed
+- **ThreadPoolExecutor Deadlock**: Resolved callback deadlock issues with separate locking strategy
+- **Thread Safety**: Eliminated race conditions in component state management and metrics collection
+- **Resource Management**: Improved cleanup and lifecycle management across all components
+
 ## [1.0.0] - 2024-07-24
 
 ### Added

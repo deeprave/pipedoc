@@ -102,8 +102,9 @@ class PipeResource:
             return False
         
         try:
-            # Open pipe in non-blocking mode for monitoring
-            pipe_fd = os.open(self._pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+            # Open pipe in non-blocking read/write mode to avoid blocking
+            # Using O_RDWR prevents blocking when no writer is connected
+            pipe_fd = os.open(self._pipe_path, os.O_RDWR | os.O_NONBLOCK)
             
             try:
                 # Use select to monitor for connection attempts

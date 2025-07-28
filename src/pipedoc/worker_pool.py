@@ -11,7 +11,7 @@ import os
 from typing import Dict, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, Future
 
-from .metrics_collector import MetricsCollector
+from pipedoc.metrics_collector import MetricsCollector
 
 
 class WorkerPool:

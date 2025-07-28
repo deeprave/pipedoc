@@ -91,13 +91,17 @@ with open('/tmp/pipedoc_12345', 'r') as f:
 
 ## Architecture
 
-The project follows SOLID principles with a clean separation of concerns:
+The project follows SOLID principles with a clean component-based architecture. For detailed technical documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Core Components
 
 - **`MarkdownFileFinder`**: Discovers and filters markdown files (SRP)
 - **`ContentProcessor`**: Reads and processes file contents (SRP)
-- **`PipeManager`**: Manages named pipe operations (SRP)
+- **`PipeManager`**: Orchestrates specialized pipe management components (SRP)
+  - **`MetricsCollector`**: Thread-safe connection statistics and monitoring
+  - **`WorkerPool`**: Enhanced ThreadPoolExecutor wrapper with capacity management
+  - **`PipeResource`**: Named pipe lifecycle management
+  - **`ConnectionManager`**: Race condition prevention with always-ready writer pattern
 - **`MarkdownPipeServer`**: Orchestrates all components (SRP + DIP)
 - **`CLI`**: Click-based command-line interface (SRP)
 
@@ -105,19 +109,30 @@ The project follows SOLID principles with a clean separation of concerns:
 
 ```
 src/pipedoc/
-├── __init__.py          # Package exports
-├── cli.py              # Click-based CLI interface
-├── server.py           # Main server orchestration
-├── file_finder.py      # File discovery logic
-├── content_processor.py # Content processing logic
-└── pipe_manager.py     # Named pipe management
+├── __init__.py              # Package exports
+├── cli.py                  # Click-based CLI interface
+├── server.py               # Main server orchestration
+├── file_finder.py          # File discovery logic
+├── content_processor.py    # Content processing logic
+├── pipe_manager.py         # Enhanced pipe manager (orchestrator)
+├── metrics_collector.py    # Thread-safe connection metrics
+├── worker_pool.py          # Enhanced ThreadPoolExecutor wrapper
+├── pipe_resource.py        # Named pipe lifecycle management
+└── connection_manager.py   # Race condition prevention
 
 tests/
-├── conftest.py         # Shared test fixtures
-├── test_file_finder.py # File finder tests
-├── test_content_processor.py # Content processor tests
-├── test_pipe_manager.py # Pipe manager tests
-└── test_server.py      # Server integration tests
+├── conftest.py                           # Shared test fixtures
+├── test_file_finder.py                   # File finder tests
+├── test_content_processor.py             # Content processor tests
+├── test_pipe_manager.py                  # Enhanced pipe manager tests
+├── test_metrics_collector.py             # Metrics component tests
+├── test_worker_pool.py                   # Worker pool component tests
+├── test_pipe_resource.py                 # Pipe resource component tests
+├── test_connection_manager.py            # Connection manager component tests
+├── test_enhanced_pipe_manager_integration.py # Integration tests
+├── test_enhanced_error_handling.py       # Error handling tests
+├── test_performance_integration.py       # Performance tests
+└── test_server.py                        # Server integration tests
 ```
 
 ## Development
@@ -191,10 +206,15 @@ just setup              # Setup development environment from scratch
 
 1. **File Discovery**: Uses `glob` to recursively find markdown files
 2. **Content Processing**: Reads and concatenates files with clear separators
-3. **Named Pipe Creation**: Creates a FIFO pipe for inter-process communication
-4. **Multi-Threading**: Each connecting process gets its own thread
-5. **Concurrent Serving**: Multiple processes can read simultaneously without interference
-6. **Signal Handling**: Graceful shutdown on SIGINT/SIGTERM with proper cleanup
+3. **Component Architecture**: Uses specialized components for different responsibilities:
+   - **PipeResource**: Creates and manages FIFO pipes
+   - **WorkerPool**: Manages ThreadPoolExecutor with capacity control
+   - **ConnectionManager**: Prevents race conditions with always-ready writer pattern
+   - **MetricsCollector**: Tracks connection statistics thread-safely
+4. **Multi-Threading**: Enhanced thread pool serves multiple processes concurrently
+5. **Race-Free Serving**: Always-ready writer pattern eliminates connection timing issues
+6. **Error Isolation**: Component failures don't cascade across the system
+7. **Signal Handling**: Graceful shutdown on SIGINT/SIGTERM with proper cleanup
 
 ## Examples
 
