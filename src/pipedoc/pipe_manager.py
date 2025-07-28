@@ -10,6 +10,7 @@ import select
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 
@@ -21,8 +22,15 @@ class PipeManager:
     only the creation, management, and cleanup of named pipes.
     """
 
-    def __init__(self):
-        """Initialize the pipe manager."""
+    def __init__(self, max_workers: Optional[int] = None, thread_pool_timeout: float = 30.0):
+        """
+        Initialize the pipe manager with thread pool configuration.
+        
+        Args:
+            max_workers: Maximum number of worker threads in the pool.
+                        If None, defaults to min(32, CPU count + 4)
+            thread_pool_timeout: Timeout for graceful pool shutdown in seconds
+        """
         self.pipe_path: Optional[str] = None
         self.running = True
         self.threads: List[threading.Thread] = []
@@ -33,6 +41,21 @@ class PipeManager:
         self._worker_start_failure_count = 0
         self._worker_lock = threading.Lock()
         self._max_start_retries = 3
+        
+        # Thread pool configuration
+        if max_workers is None:
+            max_workers = min(32, (os.cpu_count() or 1) + 4)
+        self._max_workers = max_workers
+        self._pool_timeout = thread_pool_timeout
+        
+        # Initialize thread pool
+        self._thread_pool = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="pipedoc-worker"
+        )
+        
+        # Track active futures for lifecycle management
+        self._active_futures = set()
 
     def create_named_pipe(self) -> str:
         """
@@ -129,10 +152,24 @@ class PipeManager:
         self.running = False
 
     def cleanup(self) -> None:
-        """Clean up resources."""
+        """Clean up resources including thread pool shutdown."""
         self.running = False
 
-        # Wait for threads to finish (with timeout)
+        # Shutdown thread pool gracefully
+        if hasattr(self, '_thread_pool') and self._thread_pool:
+            try:
+                active_count = len(self._active_futures) if hasattr(self, '_active_futures') else 0
+                print(f"Shutting down thread pool gracefully (waiting for {active_count} active tasks)...")
+                self._thread_pool.shutdown(wait=True)
+                print("Thread pool shut down gracefully")
+                
+                # Clear active futures tracking since pool is shut down
+                with self._worker_lock:
+                    self._active_futures.clear()
+            except Exception as e:
+                print(f"Error shutting down thread pool: {e}")
+
+        # Wait for threads to finish (with timeout) - for legacy thread handling
         for thread in self.threads:
             thread.join(timeout=1.0)
 
@@ -215,9 +252,9 @@ class PipeManager:
 
     def _spawn_worker_reactive(self, content: str, retry_count: int = 0) -> None:
         """
-        Spawn a worker thread reactively when a client connection is detected.
+        Spawn a worker task reactively using the thread pool when a client connection is detected.
         
-        Unlike the old preemptive approach, this method only creates threads
+        Unlike the old preemptive approach, this method only submits tasks to the pool
         in response to actual client connections, not speculatively.
         
         Args:
@@ -227,27 +264,26 @@ class PipeManager:
         # Increment client counter for this connection
         self._client_counter += 1
         
-        # Create a worker thread for this specific client
-        worker_thread = threading.Thread(
-            target=self.serve_client,
-            args=(self._client_counter, content),
-            daemon=True
-        )
-        
         try:
-            # Start the thread immediately (reactive approach)
-            worker_thread.start()
+            # Submit worker task to thread pool (reactive approach)
+            future = self._thread_pool.submit(
+                self.serve_client,
+                self._client_counter,
+                content
+            )
             
-            # Note: We deliberately do NOT add to self.threads list
-            # to avoid the unbounded growth issue from the old implementation
-            
-            # Track that we have a ready worker and an active worker
+            # Track the future for lifecycle management
             with self._worker_lock:
+                self._active_futures.add(future)
                 self._ready_worker_count += 1
                 self._active_worker_count += 1
+            
+            # Add completion callback to clean up future tracking
+            future.add_done_callback(self._worker_completed_callback)
+            
         except Exception as e:
-            # Thread failed to start - attempt recovery with retry tracking
-            print(f"Worker thread failed to start: {e}")
+            # Thread pool submission failed - attempt recovery with retry tracking
+            print(f"Worker pool submission failed (client {self._client_counter}): {e}")
             self._handle_worker_start_failure(content, retry_count)
 
     def _start_reactive_serving(self, content: str) -> None:
@@ -434,3 +470,30 @@ class PipeManager:
         """
         with self._worker_lock:
             return self._worker_failure_count + self._worker_start_failure_count
+
+    def _worker_completed_callback(self, future) -> None:
+        """
+        Callback invoked when a worker future completes.
+        
+        This method handles cleanup of completed futures and manages
+        worker lifecycle in the pool-based reactive system.
+        
+        Args:
+            future: The completed Future object
+        """
+        with self._worker_lock:
+            # Remove completed future from tracking
+            self._active_futures.discard(future)
+            
+            # Update worker counts
+            if self._active_worker_count > 0:
+                self._active_worker_count -= 1
+        
+        # Check if worker completed with an exception
+        try:
+            # This will raise any exception that occurred during execution
+            future.result()
+        except Exception as e:
+            # Worker failed during execution - trigger recovery
+            print(f"Worker completed with error: {e}")
+            self._worker_failed(e)
