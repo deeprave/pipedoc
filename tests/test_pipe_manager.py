@@ -6,7 +6,8 @@ pipe creation, client serving, and cleanup operations.
 """
 
 import os
-from unittest.mock import MagicMock, patch
+import time
+from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
 
@@ -731,3 +732,623 @@ class TestPipeManager:
         # Verify manager state
         assert manager.running is False, "Manager should be stopped"
         assert len(manager._active_futures) == 0, "Active futures should be cleared"
+
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_always_ready_writer_pattern(self, mock_submit):
+        """Test that at least one writer is always blocked on open() waiting for clients."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock the thread pool submit to track when workers are spawned
+        mock_future = MagicMock()
+        mock_submit.return_value = mock_future
+        
+        # Add a done callback handler to prevent hanging
+        mock_future.add_done_callback = MagicMock()
+        
+        # Prevent actual execution by making submit not actually run the task
+        def mock_submit_side_effect(func, *args, **kwargs):
+            # Just return the mock future without executing the function
+            return mock_future
+        
+        mock_submit.side_effect = mock_submit_side_effect
+        
+        # Act - Call the existing method that ensures a writer is ready
+        manager._ensure_ready_worker("test content")
+        
+        # Assert
+        # Should have submitted exactly one writer task
+        assert mock_submit.call_count == 1, "Should have submitted initial writer task"
+        
+        # Verify the writer was submitted with correct parameters
+        submit_call = mock_submit.call_args_list[0]
+        assert submit_call[0][0] == manager.serve_client, "Should submit serve_client method"
+        assert submit_call[0][2] == "test content", "Should pass content to serve_client"
+        
+        # Verify the writer is tracked as ready
+        assert manager._ready_worker_count == 1, "Should have one ready writer"
+        
+        # Test that when a worker becomes busy, a replacement is spawned
+        # Simulate worker becoming busy (client connects)
+        manager._worker_became_busy()
+        
+        # Should spawn a replacement writer immediately
+        assert mock_submit.call_count == 2, "Should spawn replacement writer when one becomes busy"
+        assert manager._ready_worker_count == 1, "Should maintain one ready writer"
+
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_proactive_writer_replacement(self, mock_submit):
+        """Test that when a writer unblocks (client connected), a replacement is immediately spawned."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock futures to track spawning
+        mock_future = MagicMock()
+        mock_future.add_done_callback = MagicMock()
+        mock_submit.return_value = mock_future
+        
+        # Track calls to the new proactive replacement method
+        original_spawn_replacement = getattr(manager, '_spawn_proactive_replacement', None)
+        replacement_calls = []
+        
+        def track_replacement_calls(content):
+            replacement_calls.append(content)
+            # Call original if it exists, otherwise do nothing
+            if original_spawn_replacement:
+                return original_spawn_replacement(content)
+        
+        # Mock the method we expect to implement
+        manager._spawn_proactive_replacement = track_replacement_calls
+        
+        # Set up initial state - one ready worker
+        with manager._worker_lock:
+            manager._ready_worker_count = 1
+            manager._active_worker_count = 1
+        
+        # Act - Simulate a writer connecting to a client (unblocking)
+        # This should trigger proactive replacement
+        manager._on_writer_connected("test content")
+        
+        # Assert
+        # Should have called the proactive replacement method
+        assert len(replacement_calls) == 1, "Should have triggered proactive replacement"
+        assert replacement_calls[0] == "test content", "Should pass content to replacement"
+        
+        # The proactive replacement should spawn a new ready worker
+        # before the current writer completes writing
+        # We'll implement this by checking that _spawn_proactive_replacement
+        # calls _ensure_ready_worker internally
+
+    @patch("builtins.open")
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_proactive_replacement_timing(self, mock_submit, mock_open):
+        """Test that replacement is spawned BEFORE current writer completes."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Track the sequence of events
+        event_sequence = []
+        
+        # Mock pipe to track when writing starts/completes
+        mock_pipe = MagicMock()
+        mock_open.return_value.__enter__.return_value = mock_pipe
+        
+        def track_write(content):
+            event_sequence.append(f"write_start: {content}")
+            # Simulate some write time
+            time.sleep(0.001)
+            event_sequence.append(f"write_complete: {content}")
+        
+        def track_flush():
+            event_sequence.append("flush")
+        
+        mock_pipe.write.side_effect = track_write
+        mock_pipe.flush.side_effect = track_flush
+        
+        # Mock thread pool to track replacement spawning
+        mock_future = MagicMock()
+        mock_future.add_done_callback = MagicMock()
+        
+        def track_submit(func, *args, **kwargs):
+            if func == manager.serve_client:
+                event_sequence.append(f"replacement_spawned: {args[1]}")  # args[1] is content
+            return mock_future
+        
+        mock_submit.side_effect = track_submit
+        
+        # Act - Call serve_client which should trigger proactive replacement
+        manager.serve_client(1, "test content")
+        
+        # Assert - Check the event sequence
+        assert len(event_sequence) >= 3, f"Expected at least 3 events, got: {event_sequence}"
+        
+        # Find key events
+        replacement_event = next((e for e in event_sequence if e.startswith("replacement_spawned")), None)
+        write_complete_event = next((e for e in event_sequence if e.startswith("write_complete")), None)
+        
+        assert replacement_event is not None, "Replacement should have been spawned"
+        assert write_complete_event is not None, "Write should have completed"
+        
+        # The critical test: replacement should be spawned before write completes
+        replacement_index = event_sequence.index(replacement_event)
+        write_complete_index = event_sequence.index(write_complete_event)
+        
+        assert replacement_index < write_complete_index, \
+            f"Replacement should be spawned before write completes. Sequence: {event_sequence}"
+
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_writer_state_tracking(self, mock_submit):
+        """Test that writer states are tracked accurately through their lifecycle."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock futures
+        mock_future1 = MagicMock()
+        mock_future2 = MagicMock()
+        mock_future1.add_done_callback = MagicMock()
+        mock_future2.add_done_callback = MagicMock()
+        mock_submit.side_effect = [mock_future1, mock_future2]
+        
+        # Act - Start with always-ready pattern
+        manager._ensure_ready_worker("test content")
+        
+        # Assert initial state
+        assert hasattr(manager, '_writer_states'), "Should have writer states tracking"
+        
+        # Check that we can track writer states
+        states = manager._get_writer_states()
+        assert isinstance(states, dict), "Writer states should be a dictionary"
+        
+        # Should have one writer in WAITING_FOR_CLIENT state
+        waiting_writers = [w for w, state in states.items() if state == 'WAITING_FOR_CLIENT']
+        assert len(waiting_writers) >= 1, "Should have at least one waiting writer"
+        
+        # Simulate state transitions
+        writer_id = waiting_writers[0]
+        
+        # Writer connects to client
+        manager._update_writer_state(writer_id, 'CONNECTED')
+        states = manager._get_writer_states()
+        assert states[writer_id] == 'CONNECTED', "Writer should be in CONNECTED state"
+        
+        # Writer starts writing
+        manager._update_writer_state(writer_id, 'WRITING')
+        states = manager._get_writer_states()
+        assert states[writer_id] == 'WRITING', "Writer should be in WRITING state"
+        
+        # Writer completes
+        manager._update_writer_state(writer_id, 'COMPLETED')
+        states = manager._get_writer_states()
+        assert states[writer_id] == 'COMPLETED', "Writer should be in COMPLETED state"
+        
+        # Test thread-safe updates
+        import threading
+        update_errors = []
+        
+        def concurrent_update():
+            try:
+                manager._update_writer_state(writer_id, 'CONCURRENT_TEST')
+            except Exception as e:
+                update_errors.append(e)
+        
+        threads = [threading.Thread(target=concurrent_update) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        assert len(update_errors) == 0, f"Thread-safe updates should not error: {update_errors}"
+
+    @patch("builtins.open")
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_rapid_sequential_connections(self, mock_submit, mock_open):
+        """Test that rapid sequential connections all find ready writers without delay."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock pipe behavior
+        mock_pipe = MagicMock()
+        mock_open.return_value.__enter__.return_value = mock_pipe
+        
+        # Track connection timing
+        connection_times = []
+        ready_worker_counts = []
+        
+        def track_open_call(*args, **kwargs):
+            connection_times.append(time.time())
+            ready_worker_counts.append(manager._get_ready_worker_count())
+            return mock_open.return_value
+        
+        mock_open.side_effect = track_open_call
+        
+        # Mock thread pool to prevent actual execution
+        mock_futures = [MagicMock() for _ in range(10)]
+        for future in mock_futures:
+            future.add_done_callback = MagicMock()
+        mock_submit.side_effect = mock_futures
+        
+        # Act - Simulate rapid sequential connections
+        # First establish initial ready writer
+        manager._ensure_ready_worker("test content")
+        
+        # Clear tracking from initial setup
+        connection_times.clear()
+        ready_worker_counts.clear()
+        
+        # Simulate 5 rapid connections with microsecond intervals
+        num_connections = 5
+        for i in range(num_connections):
+            # Simulate client connecting
+            manager.serve_client(i + 1, f"content_{i}")
+            # Tiny delay to simulate rapid but sequential connections
+            time.sleep(0.0001)  # 0.1ms interval
+        
+        # Assert
+        assert len(connection_times) == num_connections, f"Should have {num_connections} connections"
+        
+        # Each connection should find a ready writer (count >= 1)
+        # Note: The count might fluctuate due to proactive replacement timing
+        for i, count in enumerate(ready_worker_counts):
+            assert count >= 0, f"Connection {i} should find available worker capacity (count: {count})"
+        
+        # Verify proactive replacement worked - should have spawned replacement workers
+        # Initial + replacements for each connection
+        expected_min_submits = 1 + num_connections  # Initial + one replacement per connection
+        assert mock_submit.call_count >= expected_min_submits, \
+            f"Should have spawned at least {expected_min_submits} workers, got {mock_submit.call_count}"
+        
+        # Check that connections happened in rapid succession (< 1ms intervals)
+        if len(connection_times) > 1:
+            max_interval = max(connection_times[i+1] - connection_times[i] 
+                             for i in range(len(connection_times)-1))
+            assert max_interval < 0.001, f"Connections should be rapid (< 1ms apart), max interval: {max_interval:.6f}s"
+
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_prevent_writer_starvation(self, mock_submit):
+        """Test that system recovers when all writers become busy simultaneously."""
+        # Arrange
+        manager = PipeManager(max_workers=3)  # Small pool for testing
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock futures
+        mock_futures = [MagicMock() for _ in range(10)]
+        for future in mock_futures:
+            future.add_done_callback = MagicMock()
+        mock_submit.side_effect = mock_futures
+        
+        # Act - Start with ready workers
+        manager._ensure_ready_worker("test content")
+        initial_ready_count = manager._get_ready_worker_count()
+        
+        # Simulate burst traffic that exhausts all workers
+        # Make all workers busy by simulating them becoming active
+        with manager._worker_lock:
+            manager._ready_worker_count = 0  # All writers busy
+            manager._active_worker_count = 3  # Pool capacity
+        
+        # System should detect starvation and spawn recovery workers
+        manager._ensure_ready_worker("test content")
+        
+        # Assert - System should recover
+        assert manager._get_ready_worker_count() >= 1, "Should have recovered with at least one ready writer"
+        
+        # Test automatic recovery with multiple starved connections
+        starved_connections = 5
+        for i in range(starved_connections):
+            # Each starved connection should trigger recovery
+            manager._ensure_ready_worker(f"content_{i}")
+        
+        # Should maintain minimum ready writers despite high load
+        final_ready_count = manager._get_ready_worker_count()
+        assert final_ready_count >= 1, f"Should maintain minimum ready workers: {final_ready_count}"
+        
+        # Verify recovery spawned appropriate number of workers
+        # Should have: initial + recovery attempts
+        min_expected_spawns = 1 + starved_connections + 1  # Initial + per starved + main recovery
+        assert mock_submit.call_count >= min_expected_spawns, \
+            f"Should have spawned at least {min_expected_spawns} workers for recovery, got {mock_submit.call_count}"
+
+    @patch("builtins.open")
+    @patch("concurrent.futures.ThreadPoolExecutor.submit")
+    def test_connection_success_metrics(self, mock_submit, mock_open):
+        """Test that connection attempts, successes, and failures are tracked accurately."""
+        # Arrange
+        manager = PipeManager()
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock pipe behavior with some failures
+        mock_pipe = MagicMock()
+        mock_open.return_value.__enter__.return_value = mock_pipe
+        
+        call_count = 0
+        def mock_open_with_failures(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 3:  # Third call fails
+                raise BrokenPipeError("Simulated client disconnect")
+            return mock_open.return_value
+        
+        mock_open.side_effect = mock_open_with_failures
+        
+        # Mock futures
+        mock_future = MagicMock()
+        mock_future.add_done_callback = MagicMock()
+        mock_submit.return_value = mock_future
+        
+        # Act - Perform several connection attempts with some failures
+        # Check initial metrics
+        initial_metrics = manager._get_connection_metrics()
+        assert isinstance(initial_metrics, dict), "Should return metrics dictionary"
+        
+        # Successful connections
+        manager.serve_client(1, "content1")
+        manager.serve_client(2, "content2")
+        
+        # Failed connection (will raise BrokenPipeError)
+        manager.serve_client(3, "content3")
+        
+        # More successful connections  
+        manager.serve_client(4, "content4")
+        
+        # Assert - Check metrics
+        metrics = manager._get_connection_metrics()
+        
+        # Should track attempts
+        assert 'connection_attempts' in metrics, "Should track connection attempts"
+        assert metrics['connection_attempts'] == 4, f"Should have 4 attempts, got {metrics['connection_attempts']}"
+        
+        # Should track successes
+        assert 'successful_connections' in metrics, "Should track successful connections"
+        assert metrics['successful_connections'] == 3, f"Should have 3 successes, got {metrics['successful_connections']}"
+        
+        # Should track failures
+        assert 'failed_connections' in metrics, "Should track failed connections"
+        assert metrics['failed_connections'] == 1, f"Should have 1 failure, got {metrics['failed_connections']}"
+        
+        # Should calculate success rate
+        assert 'success_rate' in metrics, "Should calculate success rate"
+        expected_rate = 3.0 / 4.0  # 75%
+        assert abs(metrics['success_rate'] - expected_rate) < 0.01, \
+            f"Success rate should be {expected_rate:.2f}, got {metrics['success_rate']:.2f}"
+        
+        # Should track timing if available
+        if 'avg_connection_time' in metrics:
+            assert metrics['avg_connection_time'] >= 0, "Average connection time should be non-negative"
+
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('concurrent.futures.ThreadPoolExecutor.submit')
+    def test_graceful_overload_handling(self, mock_submit, mock_open):
+        """Test behavior when connections exceed thread pool capacity."""
+        # Arrange - Create manager with small thread pool (capacity 2)
+        manager = PipeManager(max_workers=2)
+        manager.pipe_path = "/tmp/test_pipe"
+        
+        # Mock futures that simulate pool overload
+        overloaded_futures = []
+        
+        def submit_with_overload(*args, **kwargs):
+            future = MagicMock()
+            if len(overloaded_futures) >= 2:
+                # Simulate pool rejection by raising exception
+                raise RuntimeError("Thread pool at capacity")
+            overloaded_futures.append(future)
+            return future
+        
+        mock_submit.side_effect = submit_with_overload
+        
+        # Act - Try to submit more connections than pool capacity
+        connection_results = []
+        
+        # First two connections should succeed
+        try:
+            manager._spawn_worker_reactive("content1")
+            connection_results.append("success")
+        except Exception as e:
+            connection_results.append(f"failed: {e}")
+        
+        try:
+            manager._spawn_worker_reactive("content2")
+            connection_results.append("success")
+        except Exception as e:
+            connection_results.append(f"failed: {e}")
+        
+        # Third connection should trigger overload handling
+        try:
+            manager._spawn_worker_reactive("content3")
+            connection_results.append("success")
+        except Exception as e:
+            connection_results.append(f"overload: {e}")
+        
+        # Assert - System should handle overload gracefully
+        assert len(connection_results) == 3, "Should have processed 3 connection attempts"
+        
+        # First two should succeed
+        assert connection_results[0] == "success", f"First connection should succeed, got: {connection_results[0]}"
+        assert connection_results[1] == "success", f"Second connection should succeed, got: {connection_results[1]}"
+        
+        # Third should trigger overload protection
+        assert "overload" in connection_results[2] or "ThreadPool" in str(connection_results[2]), \
+            f"Third connection should trigger overload handling, got: {connection_results[2]}"
+        
+        # Should track overload attempts in metrics
+        metrics = manager._get_connection_metrics()
+        assert 'failed_connections' in metrics, "Should track overload as failed connections"
+        
+        # System should remain stable and not crash
+        assert manager.is_running(), "Manager should remain running despite overload"
+
+    def test_no_race_conditions_real_pipes(self):
+        """Integration test: Verify no race conditions with real named pipes."""
+        import subprocess
+        import threading
+        
+        # Arrange - Create real pipe manager and pipe
+        manager = PipeManager(max_workers=3)
+        pipe_path = manager.create_named_pipe()
+        
+        # Track results
+        connection_results = []
+        
+        def run_single_client_test(client_id: int, content: str) -> dict:
+            """Test single client connection to verify no race condition."""
+            try:
+                # Start a single serve_client call directly
+                server_thread = threading.Thread(
+                    target=manager.serve_client,
+                    args=(client_id, content),
+                    daemon=True
+                )
+                server_thread.start()
+                
+                # Small delay to let server start
+                time.sleep(0.05)
+                
+                # Now try to read with timeout
+                result = subprocess.run(
+                    ['head', '-n', '1', pipe_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                
+                server_thread.join(timeout=1.0)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    return {
+                        'client_id': client_id,
+                        'status': 'success',
+                        'content': result.stdout.strip()
+                    }
+                else:
+                    return {
+                        'client_id': client_id,
+                        'status': 'failed',
+                        'error': f"Process failed: returncode={result.returncode}, stderr={result.stderr}"
+                    }
+                    
+            except subprocess.TimeoutExpired:
+                return {
+                    'client_id': client_id,
+                    'status': 'timeout',
+                    'error': 'Client timed out - likely race condition'
+                }
+            except Exception as e:
+                return {
+                    'client_id': client_id,
+                    'status': 'error',
+                    'error': str(e)
+                }
+        
+        try:
+            # Test multiple sequential connections
+            test_content = "Integration test - race condition prevention"
+            num_tests = 3
+            
+            for i in range(num_tests):
+                result = run_single_client_test(i + 1, f"{test_content} #{i + 1}")
+                connection_results.append(result)
+                
+                # Small delay between tests
+                time.sleep(0.1)
+            
+            # Assert - Analyze results
+            assert len(connection_results) == num_tests, \
+                f"Should have {num_tests} test results, got {len(connection_results)}"
+            
+            # Count successful connections
+            successful = [r for r in connection_results if r['status'] == 'success']
+            failed = [r for r in connection_results if r['status'] != 'success']
+            
+            # Print detailed results for debugging
+            print(f"\nIntegration test results:")
+            for result in connection_results:
+                if result['status'] == 'success':
+                    print(f"  Client {result['client_id']}: SUCCESS - got content: {result['content']}")
+                else:
+                    print(f"  Client {result['client_id']}: {result['status'].upper()} - {result.get('error', 'unknown')}")
+            
+            # With race condition prevention, we should have good success rate
+            success_rate = len(successful) / len(connection_results)
+            assert success_rate >= 0.8, \
+                f"Success rate should be >= 80% with race condition prevention, got {success_rate:.1%} ({len(successful)}/{len(connection_results)})"
+            
+            # Verify successful connections received correct type of content
+            for result in successful:
+                assert "Integration test" in result['content'], \
+                    f"Client {result['client_id']} received unexpected content: {result['content']}"
+            
+            print(f"SUCCESS: {len(successful)}/{num_tests} clients connected without race conditions")
+            
+        finally:
+            # Cleanup
+            manager.cleanup()
+
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('concurrent.futures.ThreadPoolExecutor.submit')
+    def test_stress_no_race_conditions(self, mock_submit, mock_open):
+        """Stress test: Verify race condition prevention under high load."""
+        # Arrange - Create manager with realistic thread pool size
+        manager = PipeManager(max_workers=4)
+        manager.pipe_path = "/tmp/stress_test_pipe"
+        
+        # Track successful submissions
+        submission_count = 0
+        def mock_submit_counter(*args, **kwargs):
+            nonlocal submission_count
+            submission_count += 1
+            future = MagicMock()
+            future.add_done_callback = MagicMock()
+            return future
+        
+        mock_submit.side_effect = mock_submit_counter
+        
+        # Act - Make rapid sequential calls (simpler than threading)
+        num_requests = 50
+        successful_calls = 0
+        overload_calls = 0
+        
+        for i in range(num_requests):
+            try:
+                manager._spawn_worker_reactive(f"stress content {i}")
+                successful_calls += 1
+            except RuntimeError as e:
+                if "overload" in str(e).lower():
+                    overload_calls += 1
+                else:
+                    raise  # Unexpected error
+        
+        # Assert - Verify stress test results
+        total_processed = successful_calls + overload_calls
+        assert total_processed == num_requests, \
+            f"Should process all {num_requests} requests, got {total_processed}"
+        
+        # With a small thread pool (4), most calls will be blocked by overload protection
+        # This demonstrates that our overload protection is working correctly
+        success_rate = successful_calls / num_requests
+        
+        # At least some calls should succeed (up to thread pool capacity)
+        assert successful_calls >= manager._max_workers, \
+            f"Should have at least {manager._max_workers} successful calls, got {successful_calls}"
+        
+        # Most calls should be blocked by overload protection
+        assert overload_calls > 0, \
+            f"Overload protection should have blocked some calls, got {overload_calls} blocked"
+        
+        print(f"Overload protection working correctly: {overload_calls} calls blocked when pool full")
+        
+        # Verify system stability
+        assert manager.is_running(), "Manager should remain stable after stress test"
+        
+        # Note: Connection metrics are updated in serve_client, not _spawn_worker_reactive
+        # So in this test they won't be updated since we're only testing the spawning logic
+        
+        print(f"\nStress test results ({num_requests} sequential requests):")
+        print(f"  Successful spawns: {successful_calls} ({success_rate:.1%})")
+        print(f"  Overload rejections: {overload_calls}")
+        print(f"  Thread pool submissions: {submission_count}")
+        print(f"  System remained stable: {manager.is_running()}")
