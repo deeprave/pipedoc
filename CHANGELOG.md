@@ -22,11 +22,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Integration Test Suites**: Comprehensive testing of component interactions, error handling, and performance validation
 - **Enhanced Metrics**: Thread-safe metrics collection with detailed connection statistics and performance monitoring
 - **Connection Management**: Advanced connection lifecycle management with overload protection
+- **Connection Queueing System**: FIFO queue for handling connection bursts when worker pool is at capacity
+- **Queue Configuration**: Configurable queue size and timeout parameters via PipeManager constructor
+- **Queue Metrics**: Comprehensive queue statistics including depth, timeouts, and wait times (PD-005)
+- **Background Queue Processor**: Dedicated background worker for processing queued connections (PD-005)
+- **Timeout Management**: Automatic cleanup of expired connections with configurable timeout periods (PD-005)
+
+### Enhanced
+- **ConnectionManager**: Extended with queue support while maintaining always-ready writer pattern (PD-005)
+- **MetricsCollector**: Added queue-specific metrics (queued connections, timeouts, wait times, utilization) (PD-005)
+- **PipeManager**: Added queue configuration parameters with sensible defaults (queue_size=10, queue_timeout=30s) (PD-005)
+- **Documentation**: Updated ARCHITECTURE.md and README.md with detailed queue system documentation (PD-005)
 
 ### Fixed
 - **ThreadPoolExecutor Deadlock**: Resolved callback deadlock issues with separate locking strategy
 - **Thread Safety**: Eliminated race conditions in component state management and metrics collection
 - **Resource Management**: Improved cleanup and lifecycle management across all components
+
+### Technical Notes (PD-005)
+- **Queue Type**: Python `queue.Queue` with configurable size limits
+- **Processing Model**: FIFO background processor with WorkerPool capacity monitoring  
+- **Thread Safety**: Dedicated queue locks to prevent deadlocks with ThreadPoolExecutor
+- **Error Handling**: Graceful handling of queue overflow, timeouts, and worker failures
+- **Performance**: Minimal overhead for immediate connections, efficient queue processing
 
 ## [1.0.0] - 2024-07-24
 

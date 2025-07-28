@@ -383,3 +383,29 @@ class TestPipeManager:
             
         finally:
             manager.cleanup()
+
+    def test_queue_configuration(self):
+        """Test queue configuration parameters are passed correctly."""
+        # Test with custom queue settings
+        manager = PipeManager(
+            max_workers=2,
+            queue_size=5,
+            queue_timeout=15.0
+        )
+        
+        try:
+            # Verify queue configuration is passed to ConnectionManager
+            queue_metrics = manager._get_queue_metrics()
+            assert queue_metrics['max_size'] == 5, "Queue size should be configured correctly"
+            
+            # Test that queue functionality works
+            manager.create_named_pipe()
+            manager.start_serving("test content")
+            
+            # Should be able to get queue metrics
+            assert 'current_depth' in queue_metrics
+            assert 'total_queued' in queue_metrics
+            assert 'timeout_count' in queue_metrics
+            
+        finally:
+            manager.cleanup()

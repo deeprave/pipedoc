@@ -226,3 +226,230 @@ class TestEnhancedPipeManagerIntegration:
         # Multiple cleanups should be safe
         manager.cleanup()
         manager.cleanup()
+
+    def test_connection_queue_integration(self):
+        """Test end-to-end connection queueing functionality."""
+        # Arrange
+        manager = PipeManager(
+            max_workers=2,
+            queue_size=3,
+            queue_timeout=5.0
+        )
+        
+        # Mock slow connection processing to force queueing
+        original_worker = manager._connection_manager._handle_connection_worker
+        def slow_worker():
+            time.sleep(0.3)  # Simulate slow processing
+            return original_worker()
+        manager._connection_manager._handle_connection_worker = slow_worker
+        
+        try:
+            # Act - Start serving
+            manager.create_named_pipe()
+            manager.start_serving("test content for queue integration")
+            
+            # Fill worker pool and queue
+            futures = []
+            for i in range(5):  # 2 immediate + 3 queued
+                future = manager._handle_incoming_connection()
+                if future:
+                    futures.append(future)
+            
+            # Allow some processing time
+            time.sleep(0.1)
+            
+            # Assert - Verify queue is working
+            queue_metrics = manager._get_queue_metrics()
+            assert queue_metrics['current_depth'] >= 2, "Should have connections queued"
+            
+            # Verify metrics integration
+            metrics = manager._get_metrics()
+            assert metrics['connections_queued'] >= 3, "Should track queued connections"
+            assert metrics['connection_attempts'] >= 5, "Should track all attempts"
+            
+            # Test queue overflow
+            overflow_future = manager._handle_incoming_connection()
+            assert overflow_future is None, "Should reject when queue is full"
+            
+            # Verify overflow recorded in metrics
+            updated_metrics = manager._get_metrics()
+            assert updated_metrics['failed_connections'] > 0, "Should record failed connections"
+            
+        finally:
+            manager.cleanup()
+
+    def test_connection_queue_timeout_integration(self):
+        """Test connection timeout handling in queue integration."""
+        # Arrange
+        manager = PipeManager(
+            max_workers=1,
+            queue_size=2,
+            queue_timeout=0.2  # Very short timeout for testing
+        )
+        
+        # Mock very slow worker to force timeouts
+        original_worker = manager._connection_manager._handle_connection_worker
+        def very_slow_worker():
+            time.sleep(1.0)  # Much longer than timeout
+            return original_worker()
+        manager._connection_manager._handle_connection_worker = very_slow_worker
+        
+        try:
+            # Act - Start serving
+            manager.create_named_pipe()
+            manager.start_serving("test content for timeout integration")
+            
+            # Fill worker pool
+            blocking_future = manager._handle_incoming_connection()
+            
+            # Give time for worker to start
+            time.sleep(0.1)
+            
+            # Queue connections that will timeout
+            timeout_futures = []
+            for i in range(2):
+                future = manager._handle_incoming_connection()
+                if future:
+                    timeout_futures.append(future)
+            
+            # Wait for timeout to occur
+            time.sleep(0.4)
+            
+            # Assert - Verify timeout handling
+            metrics = manager._get_metrics()
+            assert metrics['connections_timeout'] > 0, "Should record connection timeouts"
+            
+            # Verify timeout futures are resolved with exceptions
+            for future in timeout_futures:
+                if future.done():
+                    try:
+                        future.result()
+                        assert False, "Future should have timed out with exception"
+                    except Exception:
+                        pass  # Expected timeout exception
+            
+        finally:
+            manager.cleanup()
+
+    def test_queue_processing_order_integration(self):
+        """Test that queue system processes connections and maintains functionality."""
+        # Arrange
+        manager = PipeManager(
+            max_workers=1,
+            queue_size=5,
+            queue_timeout=10.0
+        )
+        
+        # Track connection processing
+        processed_connections = []
+        original_worker = manager._connection_manager._handle_connection_worker
+        
+        def tracking_worker():
+            # Add delay to allow queue observation
+            time.sleep(0.3)
+            result = original_worker()
+            processed_connections.append(result)
+            return result
+        
+        manager._connection_manager._handle_connection_worker = tracking_worker
+        
+        try:
+            # Act - Start serving
+            manager.create_named_pipe()
+            manager.start_serving("test content for queue processing integration")
+            
+            # Submit multiple connections
+            futures = []
+            for i in range(3):
+                future = manager._handle_incoming_connection()
+                if future:
+                    futures.append(future)
+            
+            # Give time for processing to start
+            time.sleep(0.1)
+            
+            # Verify queue functionality
+            queue_metrics = manager._get_queue_metrics()
+            initial_depth = queue_metrics['current_depth']
+            
+            # Wait for some processing to occur
+            time.sleep(1.0)
+            
+            # Verify system is processing connections
+            assert len(processed_connections) > 0, "Should have processed some connections"
+            
+            # Verify queue metrics are working
+            updated_queue_metrics = manager._get_queue_metrics()
+            assert isinstance(updated_queue_metrics, dict), "Should provide queue metrics"
+            assert 'current_depth' in updated_queue_metrics, "Should include current depth"
+            
+            # Verify metrics integration
+            metrics = manager._get_metrics()
+            assert metrics['connection_attempts'] >= 3, "Should track connection attempts"
+            
+            # The queue system is working if we can get metrics and process connections
+            assert len(futures) == 3, "Should have accepted 3 connections"
+            
+        finally:
+            manager.cleanup()
+
+    def test_queue_recovery_after_errors_integration(self):
+        """Test that queue system recovers gracefully from errors."""
+        # Arrange
+        manager = PipeManager(
+            max_workers=2,
+            queue_size=3,
+            queue_timeout=5.0
+        )
+        
+        # Mock worker that sometimes fails
+        error_count = 0
+        original_worker = manager._connection_manager._handle_connection_worker
+        
+        def sometimes_failing_worker():
+            nonlocal error_count
+            error_count += 1
+            if error_count % 3 == 0:  # Every third call fails
+                raise RuntimeError(f"Simulated error {error_count}")
+            return original_worker()
+        
+        manager._connection_manager._handle_connection_worker = sometimes_failing_worker
+        
+        try:
+            # Act - Start serving
+            manager.create_named_pipe()
+            manager.start_serving("test content for error recovery")
+            
+            # Submit multiple connections, some will fail
+            futures = []
+            for i in range(6):
+                future = manager._handle_incoming_connection()
+                if future:
+                    futures.append(future)
+            
+            # Wait for processing with error handling
+            successful_count = 0
+            failed_count = 0
+            
+            for future in futures:
+                try:
+                    future.result(timeout=1.0)
+                    successful_count += 1
+                except Exception:
+                    failed_count += 1
+            
+            # Assert - Verify system continues to function despite errors
+            assert successful_count > 0, "Should have some successful connections"
+            # Note: failed_count might be 0 if errors are handled at future level
+            
+            # Verify metrics track successes (failures might be tracked differently)
+            metrics = manager._get_metrics()
+            assert metrics['successful_connections'] > 0, "Should track successful connections"
+            # Connection failures might not be tracked if worker fails after task submission
+            
+            # Verify queue system is still functional
+            queue_metrics = manager._get_queue_metrics()
+            assert isinstance(queue_metrics, dict), "Queue metrics should still be accessible"
+            
+        finally:
+            manager.cleanup()

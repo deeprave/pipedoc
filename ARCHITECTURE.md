@@ -160,6 +160,45 @@ The architecture promotes:
 - Integration with WorkerPool for task submission
 - Connection state tracking and management
 
+### Connection Queueing (PD-005)
+**Implementation**: Enhanced ConnectionManager with queue support  
+**Purpose**: Handle bursts of connections when worker pool is at capacity
+
+**Queue Architecture:**
+- **Queue Type**: Python `queue.Queue` with configurable size limit
+- **Processing Model**: FIFO (First-In-First-Out) background processor
+- **Timeout Handling**: Per-connection timeout with automatic cleanup
+- **Overflow Strategy**: Reject connections when queue is full
+
+**Key Features:**
+- **Configurable Queue Size**: Default 10 connections, customizable via PipeManager
+- **Connection Timeout**: Default 30s timeout for queued connections
+- **Background Processing**: Dedicated queue processor monitors WorkerPool capacity
+- **Metrics Integration**: Queue depth, timeouts, and processing times tracked
+- **Thread Safety**: All queue operations use dedicated locks
+
+**Queue Processing Flow:**
+1. **Immediate Processing**: If WorkerPool has capacity, process immediately
+2. **Queue Submission**: If WorkerPool full, add to queue with timeout
+3. **Background Monitoring**: Queue processor waits for WorkerPool capacity
+4. **FIFO Processing**: Process queued connections in submission order
+5. **Timeout Management**: Automatic cleanup of expired connections
+
+**Configuration Options:**
+```python
+manager = PipeManager(
+    max_workers=4,
+    queue_size=15,      # Maximum queued connections
+    queue_timeout=45.0  # Timeout in seconds
+)
+```
+
+**Queue Metrics:**
+- `current_depth`: Current number of queued connections
+- `total_queued`: Total connections queued since startup
+- `timeout_count`: Number of connections that timed out
+- `max_size`: Maximum queue capacity
+
 ## Threading Model
 
 ### ThreadPoolExecutor Integration
@@ -298,8 +337,9 @@ Each component has dedicated test suites:
 ### Available Metrics
 - **Connection Statistics**: Attempts, successes, failures, timing
 - **Worker Pool Status**: Active threads, capacity, utilization
+- **Queue Metrics**: Current depth, total queued, timeouts, wait times
 - **Component Health**: Running status, error rates
-- **Performance Metrics**: Connection times, throughput
+- **Performance Metrics**: Connection times, throughput, queue utilization
 
 ### Logging Integration
 - **Component Context**: All logs include component identification
@@ -309,8 +349,10 @@ Each component has dedicated test suites:
 
 ## Future Enhancements
 
-### Planned Features (PD-005, PD-006)
-- **Connection Queueing**: FIFO queue for connection requests
+### Implemented Features (PD-005)
+- **Connection Queueing**: ✅ FIFO queue for connection requests with configurable size and timeout
+
+### Planned Features (PD-006+)
 - **Lifecycle Events**: Event system for connection state changes
 - **Alternative Backends**: Support for different IPC mechanisms
 - **Health Monitoring**: Advanced health checks and self-healing
@@ -323,6 +365,6 @@ Each component has dedicated test suites:
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: PD-004 Implementation Complete  
-**Architecture Review**: Required before PD-005 implementation
+**Document Version**: 1.1  
+**Last Updated**: PD-005 Implementation Complete (Connection Queueing)  
+**Architecture Review**: Required before PD-006 implementation

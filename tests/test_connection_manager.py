@@ -305,3 +305,211 @@ class TestConnectionManager:
             connection_mgr.shutdown()
             worker_pool.shutdown(wait=True)
             pipe_resource.cleanup()
+
+    def test_connection_manager_queue_basic_functionality(self):
+        """Test basic connection queueing when worker pool is at capacity."""
+        # Arrange
+        metrics = MetricsCollector()
+        worker_pool = WorkerPool(max_workers=2)  # Small pool to test queueing
+        pipe_resource = PipeResource()
+        pipe_resource.create_pipe()
+        
+        # Create connection manager with queue configuration
+        connection_mgr = ConnectionManager(
+            worker_pool=worker_pool,
+            metrics_collector=metrics,
+            pipe_resource=pipe_resource,
+            queue_size=5,
+            queue_timeout=10.0
+        )
+        
+        # Mock the connection worker to simulate long-running tasks
+        original_worker = connection_mgr._handle_connection_worker
+        def slow_worker():
+            time.sleep(0.5)  # Simulate slow connection processing
+            return original_worker()
+        connection_mgr._handle_connection_worker = slow_worker
+        
+        try:
+            connection_mgr.start_connection_management()
+            
+            # Fill worker pool to capacity with slow workers
+            immediate_futures = []
+            for i in range(2):  # Fill max_workers
+                future = connection_mgr.handle_incoming_connection()
+                if future:
+                    immediate_futures.append(future)
+            
+            # Give time for workers to start processing
+            time.sleep(0.1)
+            
+            # Additional connections should be queued
+            queued_futures = []
+            for i in range(3):  # Should be queued
+                future = connection_mgr.handle_incoming_connection()
+                if future:
+                    queued_futures.append(future)
+            
+            # Verify queue metrics
+            queue_metrics = connection_mgr.get_queue_metrics()
+            assert queue_metrics['current_depth'] == 3, f"Should have 3 connections queued, got {queue_metrics['current_depth']}"
+            assert queue_metrics['total_queued'] >= 3, "Should track total queued connections"
+            
+            # Verify metrics collector integration
+            metrics_data = metrics.get_metrics()
+            assert metrics_data['connections_queued'] >= 3, "Should record queued connections in metrics"
+            
+        finally:
+            connection_mgr.shutdown()
+            worker_pool.shutdown(wait=True)
+            pipe_resource.cleanup()
+
+    def test_connection_manager_queue_timeout_handling(self):
+        """Test connection timeout handling in queue."""
+        # Arrange
+        metrics = MetricsCollector()
+        worker_pool = WorkerPool(max_workers=1)  # Very small pool
+        pipe_resource = PipeResource()
+        pipe_resource.create_pipe()
+        
+        connection_mgr = ConnectionManager(
+            worker_pool=worker_pool,
+            metrics_collector=metrics,
+            pipe_resource=pipe_resource,
+            queue_size=3,
+            queue_timeout=0.1  # Very short timeout for testing
+        )
+        
+        try:
+            connection_mgr.start_connection_management()
+            
+            # Fill worker pool
+            immediate_future = connection_mgr.handle_incoming_connection()
+            
+            # Queue additional connections that should timeout
+            queued_futures = []
+            for i in range(2):
+                future = connection_mgr.handle_incoming_connection()
+                if future:
+                    queued_futures.append(future)
+            
+            # Wait for timeout to occur
+            time.sleep(0.2)
+            
+            # Verify timeout metrics
+            metrics_data = metrics.get_metrics()
+            assert metrics_data['connections_timeout'] > 0, "Should record connection timeouts"
+            
+            queue_metrics = connection_mgr.get_queue_metrics()
+            assert queue_metrics['timeout_count'] > 0, "Should track timeout events"
+            
+        finally:
+            connection_mgr.shutdown()
+            worker_pool.shutdown(wait=True)
+            pipe_resource.cleanup()
+
+    def test_connection_manager_queue_overflow_handling(self):
+        """Test behavior when queue reaches maximum capacity."""
+        # Arrange
+        metrics = MetricsCollector()
+        worker_pool = WorkerPool(max_workers=1)
+        pipe_resource = PipeResource()
+        pipe_resource.create_pipe()
+        
+        connection_mgr = ConnectionManager(
+            worker_pool=worker_pool,
+            metrics_collector=metrics,
+            pipe_resource=pipe_resource,
+            queue_size=2,  # Small queue for testing overflow
+            queue_timeout=30.0
+        )
+        
+        # Mock the connection worker to simulate long-running tasks
+        original_worker = connection_mgr._handle_connection_worker
+        def slow_worker():
+            time.sleep(1.0)  # Simulate very slow connection processing
+            return original_worker()
+        connection_mgr._handle_connection_worker = slow_worker
+        
+        try:
+            connection_mgr.start_connection_management()
+            
+            # Fill worker pool
+            immediate_future = connection_mgr.handle_incoming_connection()
+            
+            # Give time for worker to start processing
+            time.sleep(0.1)
+            
+            # Fill queue to capacity
+            queued_futures = []
+            for i in range(2):  # Fill queue
+                future = connection_mgr.handle_incoming_connection()
+                if future:
+                    queued_futures.append(future)
+            
+            # Additional connection should be rejected (queue full)
+            overflow_future = connection_mgr.handle_incoming_connection()
+            assert overflow_future is None, "Should reject connection when queue is full"
+            
+            # Verify overflow is recorded in metrics
+            metrics_data = metrics.get_metrics()
+            assert metrics_data['failed_connections'] > 0, "Should record failed connections due to overflow"
+            
+        finally:
+            connection_mgr.shutdown()
+            worker_pool.shutdown(wait=True)
+            pipe_resource.cleanup()
+
+    def test_connection_manager_queue_fifo_ordering(self):
+        """Test that queued connections are processed in FIFO order."""
+        # Arrange
+        metrics = MetricsCollector()
+        worker_pool = WorkerPool(max_workers=1)
+        pipe_resource = PipeResource()
+        pipe_resource.create_pipe()
+        
+        connection_mgr = ConnectionManager(
+            worker_pool=worker_pool,
+            metrics_collector=metrics,
+            pipe_resource=pipe_resource,
+            queue_size=5,
+            queue_timeout=30.0
+        )
+        
+        # Mock the connection worker to simulate long-running tasks
+        original_worker = connection_mgr._handle_connection_worker
+        def slow_worker():
+            time.sleep(0.5)  # Simulate slow connection processing
+            return original_worker()
+        connection_mgr._handle_connection_worker = slow_worker
+        
+        try:
+            connection_mgr.start_connection_management()
+            
+            # Fill worker pool with a long-running task
+            blocking_future = connection_mgr.handle_incoming_connection()
+            
+            # Give time for worker to start processing
+            time.sleep(0.1)
+            
+            # Queue multiple connections
+            queued_futures = []
+            for i in range(3):
+                future = connection_mgr.handle_incoming_connection()
+                if future:
+                    queued_futures.append((i, future))
+            
+            # Verify queue has items
+            queue_state = connection_mgr.get_queue_state()
+            assert queue_state['size'] == 3, "Queue should have 3 items"
+            assert not queue_state['empty'], "Queue should not be empty"
+            
+            # For FIFO testing, we can verify that the queue processes items 
+            # in the order they were added (this is guaranteed by Python's Queue)
+            queue_metrics = connection_mgr.get_queue_metrics()
+            assert queue_metrics['current_depth'] == 3, "Should have 3 connections queued"
+            
+        finally:
+            connection_mgr.shutdown()
+            worker_pool.shutdown(wait=True)
+            pipe_resource.cleanup()

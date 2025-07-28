@@ -12,6 +12,7 @@ A Python utility that serves concatenated markdown files through a named pipe to
 - **Content Processing**: Concatenates files with clear separators showing file paths
 - **Named Pipe Serving**: Creates named pipes for inter-process communication
 - **Multi-Client Support**: Serves content to multiple processes simultaneously using threads
+- **Connection Queueing**: FIFO queue for handling bursts of simultaneous connections
 - **Graceful Shutdown**: Handles signals and cleans up resources properly
 
 ## Installation
@@ -98,10 +99,10 @@ The project follows SOLID principles with a clean component-based architecture. 
 - **`MarkdownFileFinder`**: Discovers and filters markdown files (SRP)
 - **`ContentProcessor`**: Reads and processes file contents (SRP)
 - **`PipeManager`**: Orchestrates specialized pipe management components (SRP)
-  - **`MetricsCollector`**: Thread-safe connection statistics and monitoring
+  - **`MetricsCollector`**: Thread-safe connection statistics, queue metrics, and monitoring
   - **`WorkerPool`**: Enhanced ThreadPoolExecutor wrapper with capacity management
   - **`PipeResource`**: Named pipe lifecycle management
-  - **`ConnectionManager`**: Race condition prevention with always-ready writer pattern
+  - **`ConnectionManager`**: Race condition prevention with always-ready writer pattern and FIFO connection queueing
 - **`MarkdownPipeServer`**: Orchestrates all components (SRP + DIP)
 - **`CLI`**: Click-based command-line interface (SRP)
 
@@ -209,12 +210,13 @@ just setup              # Setup development environment from scratch
 3. **Component Architecture**: Uses specialized components for different responsibilities:
    - **PipeResource**: Creates and manages FIFO pipes
    - **WorkerPool**: Manages ThreadPoolExecutor with capacity control
-   - **ConnectionManager**: Prevents race conditions with always-ready writer pattern
-   - **MetricsCollector**: Tracks connection statistics thread-safely
+   - **ConnectionManager**: Prevents race conditions with always-ready writer pattern and connection queueing
+   - **MetricsCollector**: Tracks connection statistics and queue metrics thread-safely
 4. **Multi-Threading**: Enhanced thread pool serves multiple processes concurrently
-5. **Race-Free Serving**: Always-ready writer pattern eliminates connection timing issues
-6. **Error Isolation**: Component failures don't cascade across the system
-7. **Signal Handling**: Graceful shutdown on SIGINT/SIGTERM with proper cleanup
+5. **Connection Queueing**: FIFO queue handles connection bursts when worker pool is at capacity
+6. **Race-Free Serving**: Always-ready writer pattern eliminates connection timing issues
+7. **Error Isolation**: Component failures don't cascade across the system
+8. **Signal Handling**: Graceful shutdown on SIGINT/SIGTERM with proper cleanup
 
 ## Examples
 

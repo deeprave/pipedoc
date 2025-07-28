@@ -167,3 +167,118 @@ class TestMetricsCollector:
         # Implementation should either reject negative times or handle them gracefully
         # This test documents the expected behavior
         assert metrics['successful_connections'] >= 1, "Should still record the success"
+
+    def test_queue_metrics_basic_functionality(self):
+        """Test queue-related metrics tracking."""
+        # Arrange
+        collector = MetricsCollector()
+        
+        # Act - Record queue events
+        collector.record_connection_queued()
+        collector.record_connection_queued()
+        collector.record_connection_dequeued(wait_time=0.5)  # 500ms wait
+        collector.record_connection_queued()
+        collector.record_connection_timeout()
+        collector.record_connection_dequeued(wait_time=1.2)  # 1200ms wait
+        
+        # Get current metrics
+        metrics = collector.get_metrics()
+        
+        # Assert - Verify queue counters
+        assert metrics['connections_queued'] == 3, "Should track total connections queued"
+        assert metrics['connections_timeout'] == 1, "Should track connection timeouts"
+        assert metrics['current_queue_depth'] == 0, "Should track current queue depth (3 queued - 2 dequeued - 1 timeout = 0)"
+        assert metrics['max_queue_depth'] == 2, "Should track maximum queue depth reached"
+        
+        # Assert - Verify queue timing calculations
+        assert 'avg_queue_wait_time' in metrics, "Should calculate average queue wait time"
+        expected_avg_wait = (0.5 + 1.2) / 2  # 850ms average
+        assert abs(metrics['avg_queue_wait_time'] - expected_avg_wait) < 0.001, \
+            f"Average wait time should be {expected_avg_wait:.3f}s, got {metrics['avg_queue_wait_time']:.3f}s"
+        
+        # Assert - Verify queue utilisation
+        assert 'queue_utilisation' in metrics, "Should calculate queue utilisation"
+        expected_utilisation = 1.0  # max_queue_depth reached at some point
+        assert metrics['queue_utilisation'] == expected_utilisation, \
+            f"Queue utilisation should be {expected_utilisation:.1%}, got {metrics['queue_utilisation']:.1%}"
+
+    def test_queue_metrics_thread_safety(self):
+        """Test that queue metrics are thread-safe under concurrent access."""
+        # Arrange
+        collector = MetricsCollector()
+        num_threads = 5
+        operations_per_thread = 10
+        
+        def worker_thread(thread_id: int):
+            """Worker that performs mixed queue operations."""
+            for i in range(operations_per_thread):
+                # Mix of different queue operations
+                collector.record_connection_queued()
+                
+                if i % 3 == 0:
+                    wait_time = 0.01 * (i + 1)
+                    collector.record_connection_dequeued(wait_time)
+                elif i % 3 == 1:
+                    collector.record_connection_timeout()
+                # else: just queue (no dequeue/timeout)
+                
+                # Small delay to increase chance of race conditions
+                time.sleep(0.001)
+        
+        # Act - Launch concurrent worker threads
+        threads = []
+        for thread_id in range(num_threads):
+            thread = threading.Thread(target=worker_thread, args=(thread_id,))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Assert - Verify all operations were recorded correctly
+        metrics = collector.get_metrics()
+        expected_queued = num_threads * operations_per_thread
+        
+        # Calculate expected dequeued and timeouts based on our logic
+        # For each thread: operations 0,3,6,9 → dequeue (4 ops)
+        # For each thread: operations 1,4,7 → timeout (3 ops)  
+        expected_dequeued = num_threads * 4  # 4 dequeue operations per thread
+        expected_timeouts = num_threads * 3   # 3 timeout operations per thread
+        
+        assert metrics['connections_queued'] == expected_queued, \
+            f"Should have {expected_queued} queued, got {metrics['connections_queued']}"
+        assert metrics['connections_timeout'] == expected_timeouts, \
+            f"Should have {expected_timeouts} timeouts, got {metrics['connections_timeout']}"
+        
+        # Current queue depth should be non-negative and calculated correctly
+        expected_current_depth = expected_queued - expected_dequeued - expected_timeouts
+        assert metrics['current_queue_depth'] == expected_current_depth, \
+            f"Current queue depth should be {expected_current_depth}, got {metrics['current_queue_depth']}"
+        assert metrics['current_queue_depth'] >= 0, "Queue depth should never be negative"
+
+    def test_queue_metrics_reset(self):
+        """Test that queue metrics are reset correctly."""
+        # Arrange
+        collector = MetricsCollector()
+        
+        # Add some queue metrics data
+        collector.record_connection_queued()
+        collector.record_connection_dequeued(wait_time=0.5)
+        collector.record_connection_timeout()
+        
+        # Verify data exists
+        metrics_before = collector.get_metrics()
+        assert metrics_before['connections_queued'] > 0, "Should have queue data before reset"
+        
+        # Act - Reset metrics
+        collector.reset_metrics()
+        
+        # Assert - Verify all queue metrics are reset
+        metrics_after = collector.get_metrics()
+        assert metrics_after['connections_queued'] == 0, "Queued connections should be reset to 0"
+        assert metrics_after['connections_timeout'] == 0, "Timeout connections should be reset to 0"
+        assert metrics_after['current_queue_depth'] == 0, "Current queue depth should be reset to 0"
+        assert metrics_after['max_queue_depth'] == 0, "Max queue depth should be reset to 0"
+        assert metrics_after['avg_queue_wait_time'] == 0.0, "Average wait time should be reset to 0"
+        assert len(metrics_after['queue_wait_times']) == 0, "Queue wait times should be empty"

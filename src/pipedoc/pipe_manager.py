@@ -46,13 +46,16 @@ class PipeManager:
     - Clean Architecture: Clear separation of concerns and dependencies
     """
     
-    def __init__(self, max_workers: Optional[int] = None, thread_pool_timeout: float = 30.0):
+    def __init__(self, max_workers: Optional[int] = None, thread_pool_timeout: float = 30.0,
+                 queue_size: int = 10, queue_timeout: float = 30.0):
         """
         Initialise the enhanced pipe manager with component architecture.
         
         Args:
             max_workers: Maximum number of worker threads (auto-calculated if None)
             thread_pool_timeout: Timeout for thread pool operations (for compatibility)
+            queue_size: Maximum number of connections that can be queued (default: 10)
+            queue_timeout: Timeout for connections waiting in queue in seconds (default: 30.0)
         """
         # Component initialization
         self._metrics_collector = MetricsCollector()
@@ -61,7 +64,9 @@ class PipeManager:
         self._connection_manager = ConnectionManager(
             worker_pool=self._worker_pool,
             metrics_collector=self._metrics_collector,
-            pipe_resource=self._pipe_resource
+            pipe_resource=self._pipe_resource,
+            queue_size=queue_size,
+            queue_timeout=queue_timeout
         )
         
         # State management
@@ -243,4 +248,8 @@ class PipeManager:
     def _handle_incoming_connection(self):
         """Handle an incoming connection through ConnectionManager."""
         return self._connection_manager.handle_incoming_connection()
+    
+    def _get_queue_metrics(self) -> dict:
+        """Get current queue metrics and statistics."""
+        return self._connection_manager.get_queue_metrics()
 
