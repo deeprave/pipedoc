@@ -21,7 +21,7 @@ from pipedoc.pipe_resource import PipeResource
 @dataclass
 class QueuedConnection:
     """Represents a connection waiting in the queue."""
-    connection_id: int
+    connection_id: str
     timestamp: float
     timeout_future: Future
 
@@ -46,7 +46,7 @@ class ConnectionManager:
     
     def __init__(self, worker_pool: WorkerPool, metrics_collector: MetricsCollector, 
                  pipe_resource: PipeResource, queue_size: int = 10, 
-                 queue_timeout: float = 30.0):
+                 queue_timeout: float = 30.0, event_manager: Optional['ConnectionEventManager'] = None):
         """
         Initialise the connection manager with required components.
         
@@ -56,10 +56,12 @@ class ConnectionManager:
             pipe_resource: PipeResource for named pipe operations
             queue_size: Maximum number of connections that can be queued (default: 10)
             queue_timeout: Timeout for connections waiting in queue in seconds (default: 30.0)
+            event_manager: Optional ConnectionEventManager for lifecycle events
         """
         self._worker_pool = worker_pool
         self._metrics_collector = metrics_collector
         self._pipe_resource = pipe_resource
+        self._event_manager = event_manager
         
         # Queue configuration
         self._queue_size = queue_size
@@ -89,6 +91,29 @@ class ConnectionManager:
         
         # Writer management
         self._writer_id_counter = 0
+    
+    def _emit_event(self, event_type: 'ConnectionEvent', connection_id: str, 
+                   duration: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Emit a connection event if event manager is available.
+        
+        Args:
+            event_type: The type of connection event
+            connection_id: Unique identifier for the connection
+            duration: Optional duration for the event
+            metadata: Optional additional event data
+        """
+        if self._event_manager:
+            # Import here to avoid circular imports
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            
+            event_data = ConnectionEvent(
+                event_type=event_type,
+                connection_id=connection_id,
+                timestamp=time.time(),
+                duration=duration,
+                metadata=metadata or {}
+            )
+            self._event_manager.emit_event(event_data)
     
     def start_connection_management(self) -> None:
         """Start connection management with always-ready writer pattern."""
@@ -158,40 +183,58 @@ class ConnectionManager:
         Returns:
             Future for the connection handling task, or None if cannot accept (queue full)
         """
+        # Generate connection ID for event tracking
+        with self._queue_lock:
+            self._connection_id_counter += 1
+            connection_id = f"conn_{self._connection_id_counter}"
+        
+        # Emit connection attempt event
+        from pipedoc.connection_events import ConnectionEventType
+        self._emit_event(
+            ConnectionEventType.CONNECT_ATTEMPT,
+            connection_id,
+            metadata={'queue_depth': self._connection_queue.qsize()}
+        )
+        
         # Record connection attempt
         self._metrics_collector.record_connection_attempt()
         
         # Try immediate processing first if worker pool has capacity
         if self.can_accept_connections():
-            return self._process_connection_immediately()
+            return self._process_connection_immediately(connection_id)
         
         # If worker pool is busy, try to queue the connection
-        return self._queue_connection()
+        return self._queue_connection(connection_id)
     
-    def _process_connection_immediately(self) -> Optional[Future]:
+    def _process_connection_immediately(self, connection_id: str) -> Optional[Future]:
         """Process a connection immediately without queueing."""
         connection_future = None
         
         with self._connection_lock:
             try:
-                # Submit connection handling task
+                # Submit connection handling task with connection_id
                 connection_future = self._worker_pool.submit_task(
-                    self._handle_connection_worker
+                    lambda: self._handle_connection_worker(connection_id)
                 )
                 
                 if connection_future:
                     self._active_connections += 1
                     
-                    # Add callback to track connection completion
-                    # Use a lock-free callback to avoid deadlock with future.result()
-                    connection_future.add_done_callback(self._on_connection_complete_lockfree)
+                    # Add callback to track connection completion and emit events
+                    connection_future.add_done_callback(
+                        lambda f: self._on_connection_complete_with_events(f, connection_id)
+                    )
                 else:
                     # Failed to submit task
                     self._metrics_collector.record_connection_failure()
+                    from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                    self._emit_event(ConnectionEventType.CONNECT_FAILURE, connection_id)
                     
             except Exception:
                 # Error in connection handling
                 self._metrics_collector.record_connection_failure()
+                from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                self._emit_event(ConnectionEventType.CONNECT_FAILURE, connection_id)
                 
         # Prepare new writer after releasing lock (always-ready pattern)
         if connection_future:
@@ -199,16 +242,11 @@ class ConnectionManager:
             
         return connection_future
     
-    def _queue_connection(self) -> Optional[Future]:
+    def _queue_connection(self, connection_id: str) -> Optional[Future]:
         """Queue a connection request when worker pool is at capacity."""
         try:
             # Create a future that will be resolved when the connection is processed
             timeout_future = Future()
-            
-            # Generate unique connection ID
-            with self._queue_lock:
-                self._connection_id_counter += 1
-                connection_id = self._connection_id_counter
             
             # Create queued connection
             queued_conn = QueuedConnection(
@@ -220,6 +258,14 @@ class ConnectionManager:
             # Try to add to queue (non-blocking)
             try:
                 self._connection_queue.put_nowait(queued_conn)
+                
+                # Emit queued event
+                from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                self._emit_event(
+                    ConnectionEventType.CONNECT_QUEUED,
+                    connection_id,
+                    metadata={'queue_depth': self._connection_queue.qsize()}
+                )
                 
                 # Record queuing in metrics
                 self._metrics_collector.record_connection_queued()
@@ -235,11 +281,15 @@ class ConnectionManager:
             except Full:
                 # Queue is full, reject connection
                 self._metrics_collector.record_connection_failure()
+                from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                self._emit_event(ConnectionEventType.CONNECT_FAILURE, connection_id)
                 return None
                 
         except Exception:
             # Error in queueing
             self._metrics_collector.record_connection_failure()
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            self._emit_event(ConnectionEventType.CONNECT_FAILURE, connection_id)
             return None
 
     def _setup_connection_timeout(self, queued_conn: QueuedConnection) -> None:
@@ -251,6 +301,10 @@ class ConnectionManager:
                 with self._queue_lock:
                     # Mark as timed out in metrics
                     self._metrics_collector.record_connection_timeout()
+                
+                # Emit timeout event
+                from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                self._emit_event(ConnectionEventType.CONNECT_TIMEOUT, queued_conn.connection_id)
                 
                 # Set exception on the future to indicate timeout
                 if not queued_conn.timeout_future.done():
@@ -313,9 +367,17 @@ class ConnectionManager:
         wait_time = time.time() - queued_conn.timestamp
         
         try:
+            # Emit dequeue event
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            self._emit_event(
+                ConnectionEventType.CONNECT_DEQUEUED,
+                queued_conn.connection_id,
+                metadata={'wait_time': wait_time}
+            )
+            
             # Submit connection handling task
             connection_future = self._worker_pool.submit_task(
-                self._handle_connection_worker
+                lambda: self._handle_connection_worker(queued_conn.connection_id)
             )
             
             if connection_future:
@@ -327,10 +389,14 @@ class ConnectionManager:
                 
                 with self._connection_lock:
                     self._active_connections += 1
-                    connection_future.add_done_callback(self._on_connection_complete_lockfree)
+                    connection_future.add_done_callback(
+                        lambda f: self._on_connection_complete_with_events(f, queued_conn.connection_id)
+                    )
             else:
                 # Failed to submit task
                 self._metrics_collector.record_connection_failure()
+                from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+                self._emit_event(ConnectionEventType.CONNECT_FAILURE, queued_conn.connection_id)
                 if not queued_conn.timeout_future.done():
                     queued_conn.timeout_future.set_exception(
                         RuntimeError("Failed to submit connection task")
@@ -339,6 +405,8 @@ class ConnectionManager:
         except Exception as e:
             # Error processing queued connection
             self._metrics_collector.record_connection_failure()
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            self._emit_event(ConnectionEventType.CONNECT_FAILURE, queued_conn.connection_id)
             if not queued_conn.timeout_future.done():
                 queued_conn.timeout_future.set_exception(e)
     
@@ -364,7 +432,7 @@ class ConnectionManager:
         # This method is not used in the current simplified implementation
         pass
     
-    def _handle_connection_worker(self) -> str:
+    def _handle_connection_worker(self, connection_id: str) -> str:
         """Worker that handles an individual connection."""
         start_time = time.time()
         
@@ -398,6 +466,23 @@ class ConnectionManager:
         """
         with self._counter_lock:
             self._active_connections = max(0, self._active_connections - 1)
+    
+    def _on_connection_complete_with_events(self, future: Future, connection_id: str) -> None:
+        """Handle connection completion with event emission."""
+        # Update connection count first
+        self._on_connection_complete_lockfree(future)
+        
+        # Emit completion events
+        try:
+            result = future.result()
+            # Connection succeeded
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            self._emit_event(ConnectionEventType.CONNECT_SUCCESS, connection_id)
+            # Note: DISCONNECT event could be emitted here if needed
+        except Exception:
+            # Connection failed
+            from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+            self._emit_event(ConnectionEventType.CONNECT_FAILURE, connection_id)
     
     def _on_connection_complete(self, future: Future) -> None:
         """Original callback (causes deadlock - kept for reference)."""

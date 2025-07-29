@@ -17,12 +17,12 @@ class TestMarkdownFileFinder:
     """Test cases for MarkdownFileFinder class."""
 
     def test_init_with_valid_directory(self, temp_dir: Path):
-        """Test initialization with a valid directory."""
+        """Test initialisation with a valid directory."""
         finder = MarkdownFileFinder(str(temp_dir))
         assert finder.base_directory == temp_dir.resolve()
 
     def test_init_with_home_directory_expansion(self):
-        """Test initialization with home directory expansion."""
+        """Test initialisation with home directory expansion."""
         finder = MarkdownFileFinder("~/")
         assert finder.base_directory == Path.home().resolve()
 

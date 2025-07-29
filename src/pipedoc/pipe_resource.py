@@ -30,7 +30,7 @@ class PipeResource:
     """
     
     def __init__(self):
-        """Initialize the pipe resource manager."""
+        """Initialise the pipe resource manager."""
         self._pipe_path: Optional[str] = None
         self._is_created = False
         self._lock = threading.Lock()

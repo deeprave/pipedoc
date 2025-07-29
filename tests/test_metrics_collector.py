@@ -282,3 +282,230 @@ class TestMetricsCollector:
         assert metrics_after['max_queue_depth'] == 0, "Max queue depth should be reset to 0"
         assert metrics_after['avg_queue_wait_time'] == 0.0, "Average wait time should be reset to 0"
         assert len(metrics_after['queue_wait_times']) == 0, "Queue wait times should be empty"
+
+
+class TestMetricsCollectorEventIntegration:
+    """Test MetricsCollector integration with event system."""
+    
+    def test_metrics_collector_implements_event_listener(self):
+        """Test that MetricsCollector implements ConnectionEventListener protocol."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventListener
+        collector = MetricsCollector()
+        
+        # Assert - Should implement the protocol
+        assert isinstance(collector, ConnectionEventListener), "Should implement ConnectionEventListener protocol"
+        assert hasattr(collector, 'on_connection_event'), "Should have on_connection_event method"
+    
+    def test_metrics_collector_event_driven_basic_lifecycle(self):
+        """Test event-driven metrics collection for basic connection lifecycle."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventType, ConnectionEvent
+        import time
+        
+        collector = MetricsCollector()
+        timestamp = time.time()
+        
+        # Act - Simulate connection lifecycle through events
+        # Connection attempt
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_ATTEMPT,
+            connection_id="conn_1",
+            timestamp=timestamp
+        ))
+        
+        # Connection success with duration
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_SUCCESS,
+            connection_id="conn_1",
+            timestamp=timestamp + 0.1,
+            duration=0.1
+        ))
+        
+        # Another connection attempt
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_ATTEMPT,
+            connection_id="conn_2",
+            timestamp=timestamp + 0.2
+        ))
+        
+        # Connection failure
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_FAILURE,
+            connection_id="conn_2",
+            timestamp=timestamp + 0.3
+        ))
+        
+        # Assert - Should track events correctly
+        metrics = collector.get_metrics()
+        assert metrics['connection_attempts'] == 2, "Should count attempts from events"
+        assert metrics['successful_connections'] == 1, "Should count successes from events"
+        assert metrics['failed_connections'] == 1, "Should count failures from events"
+        assert metrics['success_rate'] == 0.5, "Should calculate success rate from events"
+    
+    def test_metrics_collector_event_driven_queue_metrics(self):
+        """Test event-driven queue metrics collection."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventType, ConnectionEvent
+        import time
+        
+        collector = MetricsCollector()
+        timestamp = time.time()
+        
+        # Act - Simulate queue lifecycle through events
+        # Connection queued
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_QUEUED,
+            connection_id="conn_1",
+            timestamp=timestamp,
+            metadata={'queue_depth': 1}
+        ))
+        
+        # Connection dequeued with wait time
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_DEQUEUED,
+            connection_id="conn_1",
+            timestamp=timestamp + 0.5,
+            metadata={'wait_time': 0.5}
+        ))
+        
+        # Connection timeout
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_TIMEOUT,
+            connection_id="conn_2",
+            timestamp=timestamp + 1.0
+        ))
+        
+        # Assert - Should track queue events
+        metrics = collector.get_metrics()
+        assert metrics['connections_queued'] == 1, "Should count queued connections from events"
+        assert metrics['connections_timeout'] == 1, "Should count timeouts from events"
+        
+        # Should track queue statistics
+        assert 'max_queue_depth' in metrics, "Should track maximum queue depth"
+        assert 'queue_wait_times' in metrics, "Should track queue wait times"
+    
+    def test_metrics_collector_event_driven_enhanced_statistics(self):
+        """Test enhanced statistics from event-driven collection."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventType, ConnectionEvent
+        import time
+        
+        collector = MetricsCollector()
+        timestamp = time.time()
+        
+        # Act - Generate multiple events with various patterns
+        events = [
+            # Fast successful connection
+            (ConnectionEventType.CONNECT_ATTEMPT, "fast_conn", timestamp, {}),
+            (ConnectionEventType.CONNECT_SUCCESS, "fast_conn", timestamp + 0.01, {'duration': 0.01}),
+            
+            # Slow successful connection  
+            (ConnectionEventType.CONNECT_ATTEMPT, "slow_conn", timestamp + 0.1, {}),
+            (ConnectionEventType.CONNECT_SUCCESS, "slow_conn", timestamp + 0.25, {'duration': 0.15}),
+            
+            # Queued connection with timeout
+            (ConnectionEventType.CONNECT_ATTEMPT, "queued_conn", timestamp + 0.3, {}),
+            (ConnectionEventType.CONNECT_QUEUED, "queued_conn", timestamp + 0.3, {'queue_depth': 2}),
+            (ConnectionEventType.CONNECT_TIMEOUT, "queued_conn", timestamp + 5.3, {}),
+        ]
+        
+        # Emit all events
+        for event_type, conn_id, ts, metadata in events:
+            collector.on_connection_event(ConnectionEvent(
+                event_type=event_type,
+                connection_id=conn_id,
+                timestamp=ts,
+                metadata=metadata
+            ))
+        
+        # Assert - Should provide enhanced statistics
+        metrics = collector.get_metrics()
+        
+        # Basic counts
+        assert metrics['connection_attempts'] == 3, "Should count all attempts"
+        assert metrics['successful_connections'] == 2, "Should count successes"
+        assert metrics['failed_connections'] == 0, "Should count failures"
+        assert metrics['connections_timeout'] == 1, "Should count timeouts"
+        
+        # Enhanced statistics from events
+        assert 'connection_duration_histogram' in metrics, "Should provide duration histogram"
+        assert 'events_per_type' in metrics, "Should provide event type breakdown"
+    
+    def test_metrics_collector_event_backwards_compatibility(self):
+        """Test that existing metrics methods still work alongside event system."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventType, ConnectionEvent
+        import time
+        
+        collector = MetricsCollector()
+        timestamp = time.time()
+        
+        # Act - Mix traditional metrics calls with event-driven metrics
+        # Traditional method calls
+        collector.record_connection_attempt()
+        collector.record_connection_success(0.1)
+        
+        # Event-driven calls
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_ATTEMPT,
+            connection_id="event_conn",
+            timestamp=timestamp
+        ))
+        collector.on_connection_event(ConnectionEvent(
+            event_type=ConnectionEventType.CONNECT_FAILURE,
+            connection_id="event_conn",
+            timestamp=timestamp + 0.1
+        ))
+        
+        # Assert - Both methods should contribute to metrics
+        metrics = collector.get_metrics()
+        assert metrics['connection_attempts'] == 2, "Should count both traditional and event attempts"
+        assert metrics['successful_connections'] == 1, "Should count traditional success"
+        assert metrics['failed_connections'] == 1, "Should count event failure"
+        assert metrics['success_rate'] == 0.5, "Should calculate combined success rate"
+    
+    def test_metrics_collector_event_thread_safety(self):
+        """Test thread safety of event-driven metrics collection."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventType, ConnectionEvent
+        import time
+        import threading
+        
+        collector = MetricsCollector()
+        event_count = 100
+        thread_count = 3
+        
+        def generate_events(thread_id: int):
+            """Generate events from a thread."""
+            for i in range(event_count):
+                timestamp = time.time()
+                collector.on_connection_event(ConnectionEvent(
+                    event_type=ConnectionEventType.CONNECT_ATTEMPT,
+                    connection_id=f"thread_{thread_id}_conn_{i}",
+                    timestamp=timestamp
+                ))
+                collector.on_connection_event(ConnectionEvent(
+                    event_type=ConnectionEventType.CONNECT_SUCCESS,
+                    connection_id=f"thread_{thread_id}_conn_{i}",
+                    timestamp=timestamp + 0.01,
+                    duration=0.01
+                ))
+        
+        # Act - Generate events from multiple threads
+        threads = []
+        for thread_id in range(thread_count):
+            thread = threading.Thread(target=generate_events, args=(thread_id,))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Assert - All events should be recorded correctly
+        metrics = collector.get_metrics()
+        expected_total = event_count * thread_count
+        assert metrics['connection_attempts'] == expected_total, f"Should record all {expected_total} attempts"
+        assert metrics['successful_connections'] == expected_total, f"Should record all {expected_total} successes"
+        assert metrics['success_rate'] == 1.0, "Should have 100% success rate"

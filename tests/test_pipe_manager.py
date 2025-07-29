@@ -409,3 +409,171 @@ class TestPipeManager:
             
         finally:
             manager.cleanup()
+
+
+class TestPipeManagerEventIntegration:
+    """Test PipeManager integration with event system."""
+    
+    def test_pipe_manager_event_listener_configuration(self):
+        """Test that PipeManager can be configured with event listeners."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEventListener, ConnectionEvent
+        
+        received_events = []
+        
+        class TestEventListener:
+            def on_connection_event(self, event_data: ConnectionEvent) -> None:
+                received_events.append(event_data)
+        
+        listener = TestEventListener()
+        
+        # Act - Create PipeManager with event listener
+        manager = PipeManager(event_listeners=[listener])
+        
+        try:
+            # Verify event listener was registered
+            assert hasattr(manager, '_event_manager'), "Should have event manager"
+            assert manager._event_manager is not None, "Event manager should be initialized"
+            
+            # Test that we can add more listeners dynamically
+            another_listener = TestEventListener()
+            manager.add_event_listener(another_listener)
+            
+            # Test that we can remove listeners
+            manager.remove_event_listener(listener)
+            
+        finally:
+            manager.cleanup()
+    
+    def test_pipe_manager_metrics_collector_as_event_listener(self):
+        """Test that MetricsCollector is automatically registered as event listener."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+        
+        # Act - Create PipeManager with default configuration
+        manager = PipeManager()
+        
+        try:
+            # The metrics collector should be registered as an event listener
+            # Emit a test event directly to verify integration
+            if hasattr(manager, '_event_manager') and manager._event_manager:
+                test_event = ConnectionEvent(
+                    event_type=ConnectionEventType.CONNECT_ATTEMPT,
+                    connection_id="test_conn",
+                    timestamp=time.time()
+                )
+                manager._event_manager.emit_event(test_event)
+                
+                # Allow time for async event processing
+                time.sleep(0.1)
+                
+                # Verify metrics were updated
+                metrics = manager._get_metrics()
+                assert metrics['connection_attempts'] >= 1, "Metrics should track events"
+                
+        finally:
+            manager.cleanup()
+    
+    def test_pipe_manager_without_event_listeners(self):
+        """Test that PipeManager works without event listeners (backwards compatibility)."""
+        # Arrange & Act
+        manager = PipeManager(event_listeners=False)
+        
+        try:
+            # Should work normally without events
+            pipe_path = manager.create_named_pipe()
+            assert pipe_path is not None, "Should create pipe without events"
+            
+            # Basic operations should work
+            assert manager.get_pipe_path() == pipe_path
+            assert not manager.is_running()
+            
+            # Event manager should be None or minimal
+            if hasattr(manager, '_event_manager'):
+                # Event manager might exist but with no listeners
+                pass
+            
+        finally:
+            manager.cleanup()
+    
+    def test_pipe_manager_event_flow_integration(self):
+        """Test end-to-end event flow through PipeManager."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEvent, ConnectionEventType
+        
+        received_events = []
+        
+        class TestEventListener:
+            def on_connection_event(self, event_data: ConnectionEvent) -> None:
+                received_events.append(event_data)
+        
+        listener = TestEventListener()
+        manager = PipeManager(
+            max_workers=2,
+            event_listeners=[listener]
+        )
+        
+        try:
+            # Create pipe and start serving
+            pipe_path = manager.create_named_pipe()
+            manager.start_serving("test content")
+            
+            # Simulate connection handling
+            future = manager._handle_incoming_connection()
+            
+            # Wait for processing
+            if future:
+                try:
+                    future.result(timeout=2.0)
+                except Exception:
+                    pass  # Connection handling might fail in test environment
+            
+            # Should have received some events
+            assert len(received_events) > 0, "Should have received connection events"
+            
+            # Check event types
+            event_types = [e.connection_event_type for e in received_events]
+            assert ConnectionEventType.CONNECT_ATTEMPT in event_types, "Should have connection attempt event"
+            
+        finally:
+            manager.cleanup()
+    
+    def test_pipe_manager_multiple_event_listeners(self):
+        """Test that PipeManager can handle multiple event listeners."""
+        # Arrange
+        from pipedoc.connection_events import ConnectionEvent
+        
+        events_listener1 = []
+        events_listener2 = []
+        
+        class TestEventListener1:
+            def on_connection_event(self, event_data: ConnectionEvent) -> None:
+                events_listener1.append(event_data)
+        
+        class TestEventListener2:
+            def on_connection_event(self, event_data: ConnectionEvent) -> None:
+                events_listener2.append(event_data)
+        
+        listener1 = TestEventListener1()
+        listener2 = TestEventListener2()
+        
+        # Act - Create PipeManager with multiple listeners
+        manager = PipeManager(event_listeners=[listener1, listener2])
+        
+        try:
+            # Both listeners should be registered
+            assert hasattr(manager, '_event_manager'), "Should have event manager"
+            
+            # Test adding another listener dynamically
+            class TestEventListener3:
+                def on_connection_event(self, event_data: ConnectionEvent) -> None:
+                    pass
+            
+            listener3 = TestEventListener3()
+            manager.add_event_listener(listener3)
+            
+            # Test removing a listener
+            manager.remove_event_listener(listener2)
+            
+        finally:
+            manager.cleanup()

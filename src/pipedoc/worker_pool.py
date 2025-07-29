@@ -31,7 +31,7 @@ class WorkerPool:
     
     def __init__(self, max_workers: Optional[int] = None, metrics_collector: Optional[MetricsCollector] = None):
         """
-        Initialize the worker pool.
+        Initialise the worker pool.
         
         Args:
             max_workers: Maximum number of worker threads. If None, defaults to min(32, CPU count + 4)
@@ -44,7 +44,7 @@ class WorkerPool:
         self._max_workers = max_workers
         self._metrics_collector = metrics_collector
         
-        # Initialize thread pool
+        # Initialise thread pool
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="enhanced-worker"
@@ -121,7 +121,7 @@ class WorkerPool:
                 'max_workers': self._max_workers,
                 'active_workers': len(self._active_futures),
                 'is_running': self._running,
-                'utilization': len(self._active_futures) / self._max_workers
+                'utilisation': len(self._active_futures) / self._max_workers
             }
     
     def shutdown(self, wait: bool = True) -> None:

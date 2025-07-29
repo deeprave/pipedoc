@@ -238,9 +238,9 @@ class TestEnhancedPipeManagerIntegration:
         
         # Mock slow connection processing to force queueing
         original_worker = manager._connection_manager._handle_connection_worker
-        def slow_worker():
+        def slow_worker(connection_id: str):
             time.sleep(0.3)  # Simulate slow processing
-            return original_worker()
+            return original_worker(connection_id)
         manager._connection_manager._handle_connection_worker = slow_worker
         
         try:
@@ -344,10 +344,10 @@ class TestEnhancedPipeManagerIntegration:
         processed_connections = []
         original_worker = manager._connection_manager._handle_connection_worker
         
-        def tracking_worker():
+        def tracking_worker(connection_id: str):
             # Add delay to allow queue observation
             time.sleep(0.3)
-            result = original_worker()
+            result = original_worker(connection_id)
             processed_connections.append(result)
             return result
         
@@ -406,12 +406,12 @@ class TestEnhancedPipeManagerIntegration:
         error_count = 0
         original_worker = manager._connection_manager._handle_connection_worker
         
-        def sometimes_failing_worker():
+        def sometimes_failing_worker(connection_id: str):
             nonlocal error_count
             error_count += 1
             if error_count % 3 == 0:  # Every third call fails
                 raise RuntimeError(f"Simulated error {error_count}")
-            return original_worker()
+            return original_worker(connection_id)
         
         manager._connection_manager._handle_connection_worker = sometimes_failing_worker
         

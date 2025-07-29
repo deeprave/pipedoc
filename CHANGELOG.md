@@ -27,12 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Queue Metrics**: Comprehensive queue statistics including depth, timeouts, and wait times (PD-005)
 - **Background Queue Processor**: Dedicated background worker for processing queued connections (PD-005)
 - **Timeout Management**: Automatic cleanup of expired connections with configurable timeout periods (PD-005)
+- **Connection Lifecycle Events**: Event-driven architecture for monitoring and responding to connection lifecycle (PD-006)
+- **Event System**: General-purpose event system with structured logging and event handlers (PD-006)
+- **Event Handlers**: Built-in handlers for logging, statistics, and file output with JSON support (PD-006)
 
 ### Enhanced
 - **ConnectionManager**: Extended with queue support while maintaining always-ready writer pattern (PD-005)
-- **MetricsCollector**: Added queue-specific metrics (queued connections, timeouts, wait times, utilization) (PD-005)
+- **MetricsCollector**: Added queue-specific metrics (queued connections, timeouts, wait times, utilisation) (PD-005)
 - **PipeManager**: Added queue configuration parameters with sensible defaults (queue_size=10, queue_timeout=30s) (PD-005)
 - **Documentation**: Updated ARCHITECTURE.md and README.md with detailed queue system documentation (PD-005)
+- **Event Integration**: ConnectionManager and PipeManager emit lifecycle events for monitoring (PD-006)
+- **Structured Logging**: Replaced print statements with structured event-based logging throughout (PD-006)
 
 ### Fixed
 - **ThreadPoolExecutor Deadlock**: Resolved callback deadlock issues with separate locking strategy

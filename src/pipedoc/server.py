@@ -12,6 +12,7 @@ from typing import Optional
 from .content_processor import ContentProcessor
 from .file_finder import MarkdownFileFinder
 from .pipe_manager import PipeManager
+from .event_system import StructuredLogger
 
 
 class MarkdownPipeServer:
@@ -28,7 +29,7 @@ class MarkdownPipeServer:
 
     def __init__(self, docs_directory: str):
         """
-        Initialize the server with a documentation directory.
+        Initialise the server with a documentation directory.
 
         Args:
             docs_directory: Path to the directory containing markdown files
@@ -38,6 +39,7 @@ class MarkdownPipeServer:
         self.content_processor = ContentProcessor(docs_directory)
         self.pipe_manager = PipeManager()
         self.content: Optional[str] = None
+        self._logger = StructuredLogger("MarkdownPipeServer")
 
     def validate_setup(self) -> None:
         """
@@ -60,7 +62,7 @@ class MarkdownPipeServer:
         Raises:
             ValueError: If no markdown files are found
         """
-        print(f"Scanning directory: {self.docs_directory}")
+        self._logger.info("Scanning directory for markdown files", directory=self.docs_directory)
 
         # Find all markdown files
         markdown_files = self.file_finder.find_markdown_files()
@@ -76,8 +78,10 @@ class MarkdownPipeServer:
 
         # Display content statistics
         stats = self.content_processor.get_content_stats(content)
-        print(f"Total content length: {stats['total_length']} characters")
-        print(f"Lines: {stats['line_count']}, Words: {stats['word_count']}")
+        self._logger.info("Content processing completed", 
+                         total_length=stats['total_length'],
+                         line_count=stats['line_count'],
+                         word_count=stats['word_count'])
 
         self.content = content
         return content
@@ -86,7 +90,7 @@ class MarkdownPipeServer:
         """Set up signal handlers for graceful shutdown."""
 
         def signal_handler(signum, frame):
-            print(f"\nReceived signal {signum}, shutting down...")
+            self._logger.info("Received shutdown signal, stopping server", signal=signum)
             self.pipe_manager.stop_serving()
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -118,16 +122,16 @@ class MarkdownPipeServer:
             return 0
 
         except (FileNotFoundError, NotADirectoryError, PermissionError) as e:
-            print(f"Directory error: {e}")
+            self._logger.error("Directory access error", error=str(e))
             return 1
         except ValueError as e:
-            print(f"Content error: {e}")
+            self._logger.error("Content processing error", error=str(e))
             return 1
         except OSError as e:
-            print(f"Pipe error: {e}")
+            self._logger.error("Pipe operation error", error=str(e))
             return 1
         except Exception as e:
-            print(f"Server error: {e}")
+            self._logger.error("Unexpected server error", error=str(e))
             return 1
         finally:
             self.cleanup()

@@ -27,7 +27,7 @@ class MarkdownFileFinder:
 
     def __init__(self, base_directory: str):
         """
-        Initialize the file finder with a base directory.
+        Initialise the file finder with a base directory.
 
         Args:
             base_directory: The root directory to search for markdown files

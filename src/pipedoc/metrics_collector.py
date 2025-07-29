@@ -7,7 +7,8 @@ statistics like success rates and average connection times.
 """
 
 import threading
-from typing import Dict, List, Any
+from typing import Dict, List, Any, DefaultDict
+from collections import defaultdict
 
 
 class MetricsCollector:
@@ -25,7 +26,7 @@ class MetricsCollector:
     """
     
     def __init__(self):
-        """Initialize the metrics collector with empty statistics."""
+        """Initialise the metrics collector with empty statistics."""
         # Core metrics data
         self._connection_attempts = 0
         self._successful_connections = 0
@@ -38,6 +39,10 @@ class MetricsCollector:
         self._max_queue_depth = 0
         self._current_queue_depth = 0
         self._queue_wait_times: List[float] = []
+        
+        # Event-driven enhanced metrics
+        self._events_per_type: DefaultDict[str, int] = defaultdict(int)
+        self._connection_duration_histogram: DefaultDict[str, int] = defaultdict(int)
         
         # Thread safety lock
         self._metrics_lock = threading.Lock()
@@ -122,19 +127,26 @@ class MetricsCollector:
                 queue_utilisation = 0.0
             
             return {
+                # Core metrics
                 'connection_attempts': self._connection_attempts,
                 'successful_connections': self._successful_connections,
                 'failed_connections': self._failed_connections,
                 'success_rate': success_rate,
                 'avg_connection_time': avg_connection_time,
                 'connection_times': self._connection_times.copy(),  # Return copy to prevent mutation
+                
+                # Queue metrics
                 'connections_queued': self._connections_queued,
                 'connections_timeout': self._connections_timeout,
                 'current_queue_depth': self._current_queue_depth,
                 'max_queue_depth': self._max_queue_depth,
                 'avg_queue_wait_time': avg_queue_wait_time,
                 'queue_wait_times': self._queue_wait_times.copy(),  # Return copy to prevent mutation
-                'queue_utilisation': queue_utilisation
+                'queue_utilisation': queue_utilisation,
+                
+                # Enhanced event-driven metrics
+                'events_per_type': dict(self._events_per_type),
+                'connection_duration_histogram': dict(self._connection_duration_histogram)
             }
     
     def reset_metrics(self) -> None:
@@ -151,3 +163,96 @@ class MetricsCollector:
             self._max_queue_depth = 0
             self._current_queue_depth = 0
             self._queue_wait_times.clear()
+            
+            # Reset event-driven metrics
+            self._events_per_type.clear()
+            self._connection_duration_histogram.clear()
+    
+    def on_event(self, event: 'ApplicationEvent') -> None:
+        """
+        Handle general application events - delegate to connection-specific handler if applicable.
+        
+        This method implements the EventListener protocol and delegates to the
+        connection-specific handler for ConnectionEvent.
+        
+        Args:
+            event: The application event to process
+        """
+        # Import here to avoid circular imports
+        from pipedoc.connection_events import ConnectionEventType
+        
+        if isinstance(event, ConnectionEvent):
+            self.on_connection_event(event)
+    
+    def on_connection_event(self, event_data: 'ConnectionEvent') -> None:
+        """
+        Handle connection events for enhanced metrics collection.
+        
+        This method implements the ConnectionEventListener protocol to collect
+        enhanced metrics from connection lifecycle events.
+        
+        Args:
+            event_data: The connection event data to process
+        """
+        # Import here to avoid circular imports
+        from pipedoc.connection_events import ConnectionEventType
+        
+        with self._metrics_lock:
+            # Track event types
+            self._events_per_type[event_data.event_type] += 1
+            
+            # Handle different event types
+            if event_data.connection_event_type == ConnectionEventType.CONNECT_ATTEMPT:
+                self._connection_attempts += 1
+                
+            elif event_data.connection_event_type == ConnectionEventType.CONNECT_SUCCESS:
+                self._successful_connections += 1
+                
+                # Record connection time if available
+                if event_data.duration is not None:
+                    self._connection_times.append(event_data.duration)
+                    
+                    # Update duration histogram
+                    duration_bucket = self._get_duration_bucket(event_data.duration)
+                    self._connection_duration_histogram[duration_bucket] += 1
+                    
+            elif event_data.connection_event_type == ConnectionEventType.CONNECT_FAILURE:
+                self._failed_connections += 1
+                
+            elif event_data.connection_event_type == ConnectionEventType.CONNECT_QUEUED:
+                self._connections_queued += 1
+                self._current_queue_depth += 1
+                
+                # Update max queue depth from metadata if available
+                if 'queue_depth' in event_data.metadata:
+                    queue_depth = event_data.metadata['queue_depth']
+                    self._max_queue_depth = max(self._max_queue_depth, queue_depth)
+                else:
+                    self._max_queue_depth = max(self._max_queue_depth, self._current_queue_depth)
+                    
+            elif event_data.connection_event_type == ConnectionEventType.CONNECT_DEQUEUED:
+                self._current_queue_depth = max(0, self._current_queue_depth - 1)
+                
+                # Record wait time if available
+                if 'wait_time' in event_data.metadata:
+                    wait_time = event_data.metadata['wait_time']
+                    self._queue_wait_times.append(wait_time)
+                    
+            elif event_data.connection_event_type == ConnectionEventType.CONNECT_TIMEOUT:
+                self._connections_timeout += 1
+                self._current_queue_depth = max(0, self._current_queue_depth - 1)
+    
+    def _get_duration_bucket(self, duration: float) -> str:
+        """Get histogram bucket for connection duration."""
+        if duration < 0.01:
+            return "< 10ms"
+        elif duration < 0.05:
+            return "10-50ms"
+        elif duration < 0.1:
+            return "50-100ms"
+        elif duration < 0.5:
+            return "100-500ms"
+        elif duration < 1.0:
+            return "500ms-1s"
+        else:
+            return "> 1s"
