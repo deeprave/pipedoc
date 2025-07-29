@@ -6,9 +6,9 @@ concatenate them with clear file separators, and serve the content to multiple p
 simultaneously through a named pipe.
 """
 
-__version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__version__ = "2.0.0"
+__author__ = "David L Nugent"
+__email__ = "davidn@uniquode.io"
 
 from .content_processor import ContentProcessor
 from .file_finder import MarkdownFileFinder

@@ -13,6 +13,15 @@ import click
 from .server import MarkdownPipeServer
 
 
+def version_callback(ctx, param, value):
+    """Callback for the version option that prints version and exits."""
+    if not value or ctx.resilient_parsing:
+        return
+    from . import __version__
+    click.echo(f"pipedoc version {__version__}")
+    ctx.exit()
+
+
 @click.command()
 @click.argument(
     "docs_directory",
@@ -22,9 +31,16 @@ from .server import MarkdownPipeServer
     metavar="DOCS_DIRECTORY",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
-@click.option("--version", is_flag=True, help="Show version and exit")
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=version_callback,
+    help="Show version and exit"
+)
 @click.help_option("--help", "-h")
-def main(docs_directory: Path, verbose: bool, version: bool) -> None:
+def main(docs_directory: Path, verbose: bool) -> None:
     """
     Serve concatenated markdown files through a named pipe.
 
@@ -39,12 +55,6 @@ def main(docs_directory: Path, verbose: bool, version: bool) -> None:
 
         pipedoc /path/to/docs --verbose
     """
-    if version:
-        from . import __version__
-
-        click.echo(f"pipedoc version {__version__}")
-        return
-
     if verbose:
         click.echo(f"Starting pipedoc with directory: {docs_directory}")
         click.echo("Verbose mode enabled")
