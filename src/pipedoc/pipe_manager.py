@@ -101,7 +101,8 @@ class PipeManager:
             pipe_resource=self._pipe_resource,
             queue_size=queue_size,
             queue_timeout=queue_timeout,
-            event_manager=self._event_manager
+            event_manager=self._event_manager,
+            content_callback=lambda: self._current_content
         )
         
         # State management
@@ -286,6 +287,17 @@ class PipeManager:
         """
         with self._state_lock:
             return self._is_serving
+    
+    def wait_for_serving(self) -> None:
+        """
+        Block until serving is stopped.
+        
+        This method blocks the calling thread until the pipe manager
+        stops serving, providing a way to keep the main thread alive
+        while the server handles connections in background threads.
+        """
+        while self.is_running():
+            time.sleep(0.1)
 
     # Additional methods for component access (internal use)
     def _get_metrics(self) -> dict:

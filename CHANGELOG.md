@@ -5,9 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unknown] - [Unknown]
+## [2.0.0] - 2025-07-29
 
 ### Changed
+
 - **Major Architecture Refactor**: Transformed monolithic PipeManager (735 lines) into component-based architecture following Single Responsibility Principle
 - **Component Design**: Split functionality into focused components: MetricsCollector, WorkerPool, PipeResource, ConnectionManager, and orchestrating PipeManager
 - **Enhanced Thread Management**: Replaced manual thread handling with enhanced ThreadPoolExecutor wrapper providing better capacity management and error recovery
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Performance Optimisation**: Reduced component communication overhead and optimised thread pool utilisation
 
 ### Added
+
 - **ARCHITECTURE.md**: Comprehensive technical documentation covering system design, component responsibilities, and architecture decisions
 - **Component Test Suites**: Individual test files for each component ensuring isolated testing and better coverage
 - **Integration Test Suites**: Comprehensive testing of component interactions, error handling, and performance validation
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Event Handlers**: Built-in handlers for logging, statistics, and file output with JSON support (PD-006)
 
 ### Enhanced
+
 - **ConnectionManager**: Extended with queue support while maintaining always-ready writer pattern (PD-005)
 - **MetricsCollector**: Added queue-specific metrics (queued connections, timeouts, wait times, utilisation) (PD-005)
 - **PipeManager**: Added queue configuration parameters with sensible defaults (queue_size=10, queue_timeout=30s) (PD-005)
@@ -40,13 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured Logging**: Replaced print statements with structured event-based logging throughout (PD-006)
 
 ### Fixed
+
 - **ThreadPoolExecutor Deadlock**: Resolved callback deadlock issues with separate locking strategy
 - **Thread Safety**: Eliminated race conditions in component state management and metrics collection
 - **Resource Management**: Improved cleanup and lifecycle management across all components
 
 ### Technical Notes (PD-005)
+
 - **Queue Type**: Python `queue.Queue` with configurable size limits
-- **Processing Model**: FIFO background processor with WorkerPool capacity monitoring  
+- **Processing Model**: FIFO background processor with WorkerPool capacity monitoring
 - **Thread Safety**: Dedicated queue locks to prevent deadlocks with ThreadPoolExecutor
 - **Error Handling**: Graceful handling of queue overflow, timeouts, and worker failures
 - **Performance**: Minimal overhead for immediate connections, efficient queue processing
@@ -54,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2024-07-24
 
 ### Added
+
 - Initial release with SOLID architecture
 - Click-based CLI interface for easy command-line usage
 - Comprehensive test suite with 72% code coverage
@@ -70,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signal handling for graceful shutdown
 
 ### Technical Details
+
 - Python 3.8+ support
 - Unix-like system compatibility (for named pipes)
 - SOLID principles implementation:
@@ -80,10 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-platform path handling with symlink resolution
 
 ### Development Tools
+
 - pytest for testing framework
 - pytest-cov for coverage reporting
 - ruff for unified linting and formatting
 - justfile for development task automation
 - UV for dependency management
 - Comprehensive development workflow with quality checks
-

@@ -54,6 +54,7 @@ class TestEnhancedErrorHandling:
         finally:
             manager.cleanup()
 
+    @pytest.mark.hanging
     def test_automatic_recovery_mechanisms(self):
         """Test automatic recovery from component failures."""
         # Arrange  

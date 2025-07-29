@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipedoc"
-version = "1.0.0"
+version = "2.0.0"
 description = "A Python utility that serves concatenated markdown files through a named pipe to multiple processes simultaneously"
 readme = "README.md"
 license = {text = "MIT"}

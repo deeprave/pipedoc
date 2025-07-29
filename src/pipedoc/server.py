@@ -118,6 +118,9 @@ class MarkdownPipeServer:
 
             # Start serving content
             self.pipe_manager.start_serving(content)
+            
+            # Wait for serving to complete (blocks until stopped)
+            self.pipe_manager.wait_for_serving()
 
             return 0
 

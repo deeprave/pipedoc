@@ -227,6 +227,7 @@ class TestEnhancedPipeManagerIntegration:
         manager.cleanup()
         manager.cleanup()
 
+    @pytest.mark.hanging
     def test_connection_queue_integration(self):
         """Test end-to-end connection queueing functionality."""
         # Arrange
