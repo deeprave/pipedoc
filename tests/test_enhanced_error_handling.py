@@ -41,8 +41,13 @@ class TestEnhancedErrorHandling:
             manager._pipe_resource.cleanup = failing_cleanup
 
             # The failure in PipeResource should not prevent other components from working
-            assert manager._worker_pool.is_running(), "WorkerPool should still be running"
-            assert manager._connection_manager.is_running() or not manager._connection_manager.is_running(), "ConnectionManager should be in consistent state"
+            assert manager._worker_pool.is_running(), (
+                "WorkerPool should still be running"
+            )
+            assert (
+                manager._connection_manager.is_running()
+                or not manager._connection_manager.is_running()
+            ), "ConnectionManager should be in consistent state"
 
             # Metrics should still be accessible
             metrics = manager._get_metrics()
@@ -141,14 +146,18 @@ class TestEnhancedErrorHandling:
             # System should handle overload gracefully
             # Some connections might be rejected, but system should remain stable
             assert manager._worker_pool.is_running(), "WorkerPool should remain stable"
-            assert manager._connection_manager.is_running(), "ConnectionManager should remain stable"
+            assert manager._connection_manager.is_running(), (
+                "ConnectionManager should remain stable"
+            )
 
             # Completed futures should have valid results
             for future in futures:
                 if future and future.done():
                     try:
                         result = future.result(timeout=0.1)
-                        assert result is not None, "Completed futures should have valid results"
+                        assert result is not None, (
+                            "Completed futures should have valid results"
+                        )
                     except:
                         pass  # Timeout or other issues are acceptable under overload
 
@@ -189,7 +198,9 @@ class TestEnhancedErrorHandling:
 
             # Resource usage should be consistent (no major leaks)
             # This is a basic check - more sophisticated leak detection would be needed for production
-            assert isinstance(final_metrics, dict), "Metrics should be accessible after multiple lifecycles"
+            assert isinstance(final_metrics, dict), (
+                "Metrics should be accessible after multiple lifecycles"
+            )
 
         finally:
             final_manager.cleanup()
@@ -225,7 +236,9 @@ class TestEnhancedErrorHandling:
             num_threads = 4
 
             for thread_id in range(num_threads):
-                thread = threading.Thread(target=concurrent_operations, args=(thread_id,))
+                thread = threading.Thread(
+                    target=concurrent_operations, args=(thread_id,)
+                )
                 threads.append(thread)
                 thread.start()
 
@@ -235,7 +248,9 @@ class TestEnhancedErrorHandling:
 
             # Assert - System should handle concurrent errors gracefully
             # Some operations might fail due to conflicts, but system should remain stable
-            assert manager._worker_pool.is_running(), "WorkerPool should survive concurrent access"
+            assert manager._worker_pool.is_running(), (
+                "WorkerPool should survive concurrent access"
+            )
 
             # System should still be functional after concurrent stress
             final_metrics = manager._get_metrics()
@@ -258,18 +273,25 @@ class TestEnhancedErrorHandling:
 
             # Force connection manager shutdown (simulating failure)
             manager._connection_manager.shutdown()
-            assert not manager._connection_manager.is_running(), "ConnectionManager should be stopped"
+            assert not manager._connection_manager.is_running(), (
+                "ConnectionManager should be stopped"
+            )
 
             # Test recovery by restarting
             manager._connection_manager.start_connection_management()
-            assert manager._connection_manager.is_running(), "ConnectionManager should recover"
+            assert manager._connection_manager.is_running(), (
+                "ConnectionManager should recover"
+            )
 
             # System should be functional again
-            assert manager.get_pipe_path() == original_path, "Pipe should still be available"
+            assert manager.get_pipe_path() == original_path, (
+                "Pipe should still be available"
+            )
 
         finally:
             manager.cleanup()
 
+    @pytest.mark.hanging
     def test_metrics_integrity_during_errors(self):
         """Test that metrics remain accurate during error conditions."""
         # Arrange
@@ -292,7 +314,9 @@ class TestEnhancedErrorHandling:
             assert isinstance(error_metrics, dict), "Metrics should remain accessible"
 
             # Basic metrics structure should be intact
-            assert 'connection_attempts' in error_metrics, "Metrics should have expected structure"
+            assert "connection_attempts" in error_metrics, (
+                "Metrics should have expected structure"
+            )
 
         finally:
             manager.cleanup()
@@ -320,7 +344,9 @@ class TestEnhancedErrorHandling:
             # future might be None due to WorkerPool being down, which is acceptable
 
             # System should remain in consistent state
-            assert isinstance(metrics.get_metrics(), dict), "Metrics should remain accessible"
+            assert isinstance(metrics.get_metrics(), dict), (
+                "Metrics should remain accessible"
+            )
 
         finally:
             connection_manager.shutdown()

@@ -115,7 +115,7 @@ def _fix_version(init_path, target_version):
         r'^(__version__\s*=\s*)["\']([^"\']+)["\']',
         rf'\1"{target_version}"',
         content,
-        flags=re.MULTILINE
+        flags=re.MULTILINE,
     )
 
     if new_content == content:
@@ -135,12 +135,12 @@ def main() -> int:
     parser.add_argument(
         "--fix",
         action="store_true",
-        help="Autofix __init__.py version to match pyproject.toml"
+        help="Autofix __init__.py version to match pyproject.toml",
     )
     parser.add_argument(
         "--init-path",
         type=Path,
-        help="Path to __init__.py file (default: auto-discover from project name)"
+        help="Path to __init__.py file (default: auto-discover from project name)",
     )
     args = parser.parse_args()
 

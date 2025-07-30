@@ -12,7 +12,7 @@ from typing import Optional
 from .content_processor import ContentProcessor
 from .file_finder import MarkdownFileFinder
 from .pipe_manager import PipeManager
-from .event_system import StructuredLogger
+from .app_logger import get_default_logger, LogContext
 
 
 class MarkdownPipeServer:
@@ -39,7 +39,8 @@ class MarkdownPipeServer:
         self.content_processor = ContentProcessor(docs_directory)
         self.pipe_manager = PipeManager()
         self.content: Optional[str] = None
-        self._logger = StructuredLogger("MarkdownPipeServer")
+        self._logger = get_default_logger()
+        self._log_context = LogContext(component="MarkdownPipeServer")
 
     def validate_setup(self) -> None:
         """
@@ -62,7 +63,11 @@ class MarkdownPipeServer:
         Raises:
             ValueError: If no markdown files are found
         """
-        self._logger.info("Scanning directory for markdown files", directory=self.docs_directory)
+        self._logger.info(
+            "Scanning directory for markdown files",
+            context=self._log_context,
+            directory=self.docs_directory,
+        )
 
         # Find all markdown files
         markdown_files = self.file_finder.find_markdown_files()
@@ -78,10 +83,13 @@ class MarkdownPipeServer:
 
         # Display content statistics
         stats = self.content_processor.get_content_stats(content)
-        self._logger.info("Content processing completed", 
-                         total_length=stats['total_length'],
-                         line_count=stats['line_count'],
-                         word_count=stats['word_count'])
+        self._logger.info(
+            "Content processing completed",
+            context=self._log_context,
+            total_length=stats["total_length"],
+            line_count=stats["line_count"],
+            word_count=stats["word_count"],
+        )
 
         self.content = content
         return content
@@ -90,7 +98,11 @@ class MarkdownPipeServer:
         """Set up signal handlers for graceful shutdown."""
 
         def signal_handler(signum, frame):
-            self._logger.info("Received shutdown signal, stopping server", signal=signum)
+            self._logger.info(
+                "Received shutdown signal, stopping server",
+                context=self._log_context,
+                signal=signum,
+            )
             self.pipe_manager.stop_serving()
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -118,23 +130,31 @@ class MarkdownPipeServer:
 
             # Start serving content
             self.pipe_manager.start_serving(content)
-            
+
             # Wait for serving to complete (blocks until stopped)
             self.pipe_manager.wait_for_serving()
 
             return 0
 
         except (FileNotFoundError, NotADirectoryError, PermissionError) as e:
-            self._logger.error("Directory access error", error=str(e))
+            self._logger.error(
+                "Directory access error", context=self._log_context, error=str(e)
+            )
             return 1
         except ValueError as e:
-            self._logger.error("Content processing error", error=str(e))
+            self._logger.error(
+                "Content processing error", context=self._log_context, error=str(e)
+            )
             return 1
         except OSError as e:
-            self._logger.error("Pipe operation error", error=str(e))
+            self._logger.error(
+                "Pipe operation error", context=self._log_context, error=str(e)
+            )
             return 1
         except Exception as e:
-            self._logger.error("Unexpected server error", error=str(e))
+            self._logger.error(
+                "Unexpected server error", context=self._log_context, error=str(e)
+            )
             return 1
         finally:
             self.cleanup()

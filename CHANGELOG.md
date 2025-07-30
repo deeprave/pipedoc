@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Comprehensive Logging System**: Implemented enterprise-grade logging infrastructure with multiple handlers and configurable formats
+  - **Application Logger Interface**: Clean abstraction layer (`app_logger.py`) with Protocol-based design for dependency injection
+  - **Structured Logging**: JSON format support with contextual metadata (component, operation, correlation IDs)
+  - **Multiple Output Handlers**: Console, file, rotating file, and syslog handlers with individual configuration
+  - **Verbosity Levels**: SILENT → QUIET → NORMAL → VERBOSE → VERY_VERBOSE with granular control
+  - **Component Filtering**: Include/exclude specific components to reduce log noise
+  - **CLI Integration**: Complete command-line interface with logging options (--verbose, --quiet, --log-file, --json)
+  - **Environment Configuration**: All logging options configurable via environment variables
+  - **Performance Options**: Null logger for production and async logging capability
+  - **Runtime Reconfiguration**: Dynamic logging configuration changes without restart
+
+- **Version Management System**: Comprehensive version handling with multiple command options (BUG-002)
+  - **Version Command**: Dedicated `pipedoc --version` and `pipedoc version` commands
+  - **Detailed Version Info**: Package version, Python version, platform details with `pipedoc version --verbose`
+  - **JSON Output**: Machine-readable version information with `pipedoc version --json`
+  - **Development Tracking**: Git hash and development status for unreleased versions
+  - **Cross-Module Consistency**: Version synchronisation between CLI, package metadata, and documentation
+
 ### Fixed
+
+- **BUG-002: Version Command Resolution**: Resolved missing version command functionality
+  - **Root Cause**: Click command group missing version subcommand and incomplete version flag handling
+  - **Solution**: Added dedicated version command with multiple output formats and comprehensive version information
+  - **Files Modified**:
+    - `src/pipedoc/cli.py`: Added version subcommand and enhanced --version flag
+    - `src/pipedoc/__init__.py`: Centralised version management and metadata
+    - `pyproject.toml`: Version synchronisation with package metadata
 
 - **BUG-001: Application Exit After Validation**: Fixed critical bug where application would terminate immediately after validating markdown files instead of continuing to serve them
   - **Root Cause**: ConnectionManager._prepare_ready_writer() only set a flag instead of starting background worker

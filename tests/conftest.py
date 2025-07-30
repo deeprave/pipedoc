@@ -19,13 +19,13 @@ def pytest_addoption(parser):
         "--enable-slow",
         action="store_true",
         default=False,
-        help="Enable tests marked with @pytest.mark.slow (skipped by default)"
+        help="Enable tests marked with @pytest.mark.slow (skipped by default)",
     )
     parser.addoption(
         "--enable-hanging",
-        action="store_true", 
+        action="store_true",
         default=False,
-        help="Enable tests marked with @pytest.mark.hanging (skipped by default)"
+        help="Enable tests marked with @pytest.mark.hanging (skipped by default)",
     )
 
 
@@ -33,28 +33,36 @@ def pytest_configure(config):
     """Register the custom markers."""
     config.addinivalue_line(
         "markers",
-        "slow: mark test as slow (>5 seconds) - skipped by default, use --enable-slow"
+        "slow: mark test as slow (>5 seconds) - skipped by default, use --enable-slow",
     )
     config.addinivalue_line(
-        "markers", 
-        "hanging: mark test as hanging/problematic - skipped by default, use --enable-hanging"
+        "markers",
+        "hanging: mark test as hanging/problematic - skipped by default, use --enable-hanging",
     )
 
 
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to conditionally skip marked tests."""
     # Check for environment variables as alternative to command line flags
-    enable_slow = config.getoption("--enable-slow") or os.getenv("ENABLE_SLOW_TESTS", "").lower() in ("true", "1", "yes")
-    enable_hanging = config.getoption("--enable-hanging") or os.getenv("ENABLE_HANGING_TESTS", "").lower() in ("true", "1", "yes")
-    
+    enable_slow = config.getoption("--enable-slow") or os.getenv(
+        "ENABLE_SLOW_TESTS", ""
+    ).lower() in ("true", "1", "yes")
+    enable_hanging = config.getoption("--enable-hanging") or os.getenv(
+        "ENABLE_HANGING_TESTS", ""
+    ).lower() in ("true", "1", "yes")
+
     if not enable_slow:
-        skip_slow = pytest.mark.skip(reason="Use --enable-slow or set ENABLE_SLOW_TESTS=true to run slow tests")
+        skip_slow = pytest.mark.skip(
+            reason="Use --enable-slow or set ENABLE_SLOW_TESTS=true to run slow tests"
+        )
         for item in items:
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
-    
+
     if not enable_hanging:
-        skip_hanging = pytest.mark.skip(reason="Use --enable-hanging or set ENABLE_HANGING_TESTS=true to run hanging tests")
+        skip_hanging = pytest.mark.skip(
+            reason="Use --enable-hanging or set ENABLE_HANGING_TESTS=true to run hanging tests"
+        )
         for item in items:
             if "hanging" in item.keywords:
                 item.add_marker(skip_hanging)

@@ -6,6 +6,8 @@ A Python utility that serves concatenated markdown files through a named pipe to
 
 - **SOLID Architecture**: Refactored with Single Responsibility Principle, Open/Closed Principle, and Dependency Inversion
 - **Click CLI Interface**: Modern command-line interface with extensible commands
+- **Enterprise Logging System**: Comprehensive logging with multiple handlers, formats, and configuration options
+- **Version Management**: Detailed version information with multiple output formats and development tracking
 - **Comprehensive Testing**: Full test suite with pytest integration
 - **Package Structure**: Proper Python package with entry points for easy installation
 - **Recursive File Discovery**: Finds all markdown files in directory structure
@@ -66,6 +68,43 @@ pipedoc info ~/path/to/my/docs
 
 # Alternative serve command
 pipedoc serve ~/path/to/my/docs
+
+# Version management
+pipedoc version                    # Show version information
+pipedoc version --verbose          # Detailed version with Python and platform info
+pipedoc version --json             # Machine-readable JSON output
+```
+
+### Logging Options
+
+```bash
+# Verbosity levels
+pipedoc ~/docs --quiet             # Warnings and errors only
+pipedoc ~/docs --verbose           # Debug level (-v)
+pipedoc ~/docs -vv                 # Very verbose with detailed context
+
+# Output formats
+pipedoc ~/docs --json              # JSON structured logging
+pipedoc ~/docs --log-format detailed  # Timestamped detailed format
+
+# File logging
+pipedoc ~/docs --log-file app.log  # Log to file in addition to console
+pipedoc ~/docs --log-handlers rotating --log-file logs/app.log  # Rotating files
+
+# Component filtering
+pipedoc ~/docs --log-exclude WorkerPool,MetricsCollector  # Exclude noisy components
+pipedoc ~/docs --log-include-only ConnectionManager       # Only specific components
+```
+
+### Environment Configuration
+
+```bash
+# Configure logging via environment variables
+export PIPEDOC_LOG_VERBOSITY=verbose
+export PIPEDOC_LOG_FORMAT=json
+export PIPEDOC_LOG_FILE=logs/pipedoc.log
+export PIPEDOC_LOG_HANDLERS=console,rotating
+pipedoc ~/docs  # Uses environment configuration
 ```
 
 ### Reading from the Pipe
@@ -110,8 +149,8 @@ The project follows SOLID principles with a clean component-based architecture. 
 
 ```
 src/pipedoc/
-├── __init__.py              # Package exports
-├── cli.py                  # Click-based CLI interface
+├── __init__.py              # Package exports and version management
+├── cli.py                  # Click-based CLI interface with logging options
 ├── server.py               # Main server orchestration
 ├── file_finder.py          # File discovery logic
 ├── content_processor.py    # Content processing logic
@@ -119,7 +158,12 @@ src/pipedoc/
 ├── metrics_collector.py    # Thread-safe connection metrics
 ├── worker_pool.py          # Enhanced ThreadPoolExecutor wrapper
 ├── pipe_resource.py        # Named pipe lifecycle management
-└── connection_manager.py   # Race condition prevention
+├── connection_manager.py   # Race condition prevention
+├── app_logger.py           # Application logger interface and implementations
+├── logging_config.py       # Comprehensive logging configuration system
+├── connection_events.py    # Connection lifecycle events
+├── event_handlers.py       # Event handler implementations
+└── event_system.py         # General-purpose event system
 
 tests/
 ├── conftest.py                           # Shared test fixtures
@@ -281,6 +325,9 @@ pipedoc ~/docs | python my_processor.py
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## Changelog
+## Documentation
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and version history.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**: Detailed technical architecture and component design
+- **[CHANGELOG.md](CHANGELOG.md)**: Release notes and version history
+- **[LOGGING.md](LOGGING.md)**: Comprehensive logging configuration guide
+- **[EVENTS.md](EVENTS.md)**: Event system documentation and lifecycle monitoring

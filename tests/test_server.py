@@ -244,36 +244,38 @@ class TestMarkdownPipeServer:
         assert mock_pipe_manager.running is False
 
     @patch.object(MarkdownPipeServer, "setup_signal_handlers")
-    def test_server_stays_running(self, mock_signal_handlers, temp_dir: Path, sample_markdown_files: List[Path]):
+    def test_server_stays_running(
+        self, mock_signal_handlers, temp_dir: Path, sample_markdown_files: List[Path]
+    ):
         """Test that server doesn't exit immediately after starting."""
         import threading
         import time
-        
+
         server = MarkdownPipeServer(str(temp_dir))
         server_thread = None
         exit_code = None
-        
+
         def run_server():
             nonlocal exit_code
             exit_code = server.run()
-        
+
         # Start server in a thread
         server_thread = threading.Thread(target=run_server)
         server_thread.start()
-        
+
         # Give server time to start
         time.sleep(0.5)
-        
+
         # Server should still be running
         assert server.is_running() is True
         assert server_thread.is_alive() is True
-        
+
         # Stop the server
         server.pipe_manager.stop_serving()
-        
+
         # Wait for thread to complete
         server_thread.join(timeout=2.0)
-        
+
         # Server should have exited cleanly
         assert exit_code == 0
         assert server.is_running() is False

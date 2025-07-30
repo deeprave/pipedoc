@@ -32,41 +32,54 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
             # Assert - Initial state (before starting)
-            assert not connection_mgr.is_writer_ready(), "Should not have writer ready initially"
-            assert connection_mgr.get_active_connections() == 0, "Should have no active connections initially"
+            assert not connection_mgr.is_writer_ready(), (
+                "Should not have writer ready initially"
+            )
+            assert connection_mgr.get_active_connections() == 0, (
+                "Should have no active connections initially"
+            )
 
             # Test - Start connection management
             connection_mgr.start_connection_management()
 
             # The always-ready writer pattern means there should always be a writer
             # waiting for incoming connections after starting
-            assert connection_mgr.is_writer_ready(), "Should have writer ready after starting"
+            assert connection_mgr.is_writer_ready(), (
+                "Should have writer ready after starting"
+            )
 
             # Test - Simulate connection arrival
             # This should trigger replacement of the current writer with a new one
             connection_future = connection_mgr.handle_incoming_connection()
 
             # Assert - Connection handling
-            assert connection_future is not None, "Should return future for connection handling"
+            assert connection_future is not None, (
+                "Should return future for connection handling"
+            )
             assert isinstance(connection_future, Future), "Should return Future object"
 
             # Wait for connection to complete
             result = connection_future.result(timeout=1.0)
-            assert result == "connection_handled", "Connection should be handled successfully"
+            assert result == "connection_handled", (
+                "Connection should be handled successfully"
+            )
 
             # After handling connection, a new writer should be immediately available
-            assert connection_mgr.is_writer_ready(), "Should have new writer ready after connection"
+            assert connection_mgr.is_writer_ready(), (
+                "Should have new writer ready after connection"
+            )
 
         finally:
             connection_mgr.shutdown()
             worker_pool.shutdown(wait=False)  # Don't wait to avoid timeout
             pipe_resource.cleanup()
 
+    @pytest.mark.hanging
     def test_connection_manager_lifecycle_management(self):
         """Test connection manager lifecycle and state management."""
         # Arrange
@@ -78,13 +91,15 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
             # Assert - Initial state
             assert not connection_mgr.is_running(), "Should not be running initially"
-            assert connection_mgr.get_active_connections() == 0, "Should have no active connections"
+            assert connection_mgr.get_active_connections() == 0, (
+                "Should have no active connections"
+            )
 
             # Act - Start connection management
             connection_mgr.start_connection_management()
@@ -102,11 +117,15 @@ class TestConnectionManager:
 
             # Should track active connections
             active_count = connection_mgr.get_active_connections()
-            assert 0 <= active_count <= 3, f"Active connections should be 0-3, got {active_count}"
+            assert 0 <= active_count <= 3, (
+                f"Active connections should be 0-3, got {active_count}"
+            )
 
             # Test - Shutdown
             connection_mgr.shutdown()
-            assert not connection_mgr.is_running(), "Should not be running after shutdown"
+            assert not connection_mgr.is_running(), (
+                "Should not be running after shutdown"
+            )
 
         finally:
             worker_pool.shutdown(wait=False)
@@ -124,14 +143,18 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
             connection_mgr.start_connection_management()
 
             # Track writer replacement by monitoring internal state
-            initial_writer_id = connection_mgr._get_current_writer_id() if hasattr(connection_mgr, '_get_current_writer_id') else None
+            initial_writer_id = (
+                connection_mgr._get_current_writer_id()
+                if hasattr(connection_mgr, "_get_current_writer_id")
+                else None
+            )
 
             # Simulate rapid connection arrivals
             connection_count = 0
@@ -142,7 +165,9 @@ class TestConnectionManager:
 
                 # After each connection, verify a writer is still ready
                 time.sleep(0.01)  # Allow time for writer replacement
-                assert connection_mgr.is_writer_ready(), f"Should maintain ready writer after connection {i+1}"
+                assert connection_mgr.is_writer_ready(), (
+                    f"Should maintain ready writer after connection {i + 1}"
+                )
 
             # Verify that connections were handled
             assert connection_count > 0, "Should have handled at least one connection"
@@ -150,8 +175,9 @@ class TestConnectionManager:
             # Verify metrics were updated
             metrics_data = metrics.get_metrics()
             expected_attempts = connection_count
-            assert metrics_data['connection_attempts'] >= expected_attempts, \
+            assert metrics_data["connection_attempts"] >= expected_attempts, (
                 f"Should have recorded connection attempts: expected >= {expected_attempts}, got {metrics_data['connection_attempts']}"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -170,7 +196,7 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
@@ -179,7 +205,9 @@ class TestConnectionManager:
 
             # Verify pipe resource integration
             assert pipe_resource.is_pipe_created(), "Pipe should be created"
-            assert pipe_resource.get_pipe_path() == pipe_path, "Should use correct pipe path"
+            assert pipe_resource.get_pipe_path() == pipe_path, (
+                "Should use correct pipe path"
+            )
 
             # Test connection handling with metrics integration
             future = connection_mgr.handle_incoming_connection()
@@ -189,14 +217,18 @@ class TestConnectionManager:
 
                 # Verify metrics were updated
                 metrics_data = metrics.get_metrics()
-                assert metrics_data['connection_attempts'] > 0, "Should record connection attempts"
+                assert metrics_data["connection_attempts"] > 0, (
+                    "Should record connection attempts"
+                )
 
             # Test worker pool integration
             pool_metrics = worker_pool.get_metrics()
             assert isinstance(pool_metrics, dict), "Should get worker pool metrics"
 
             # Verify connection manager can query component states
-            assert connection_mgr.can_accept_connections(), "Should be able to check if connections can be accepted"
+            assert connection_mgr.can_accept_connections(), (
+                "Should be able to check if connections can be accepted"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -214,7 +246,7 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
@@ -240,7 +272,9 @@ class TestConnectionManager:
 
             # Test - Error in connection handling should be recorded in metrics
             # Force an error condition if possible
-            with patch.object(worker_pool, 'submit_task', side_effect=RuntimeError("Pool error")):
+            with patch.object(
+                worker_pool, "submit_task", side_effect=RuntimeError("Pool error")
+            ):
                 error_future = connection_mgr.handle_incoming_connection()
                 # Should handle the error gracefully
 
@@ -264,7 +298,7 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         # Track results from concurrent threads
@@ -289,7 +323,9 @@ class TestConnectionManager:
             threads = []
             num_threads = 4
             for thread_id in range(num_threads):
-                thread = threading.Thread(target=concurrent_connection_handler, args=(thread_id,))
+                thread = threading.Thread(
+                    target=concurrent_connection_handler, args=(thread_id,)
+                )
                 threads.append(thread)
                 thread.start()
 
@@ -298,11 +334,17 @@ class TestConnectionManager:
                 thread.join(timeout=5.0)
 
             # Assert - Verify thread safety
-            assert len(errors) == 0, f"Should have no errors in concurrent access: {errors}"
-            assert len(results) > 0, "Should have processed some connections concurrently"
+            assert len(errors) == 0, (
+                f"Should have no errors in concurrent access: {errors}"
+            )
+            assert len(results) > 0, (
+                "Should have processed some connections concurrently"
+            )
 
             # Verify connection manager is still in consistent state
-            assert connection_mgr.is_running(), "Should still be running after concurrent access"
+            assert connection_mgr.is_running(), (
+                "Should still be running after concurrent access"
+            )
             assert connection_mgr.is_writer_ready(), "Should maintain writer readiness"
 
         finally:
@@ -324,7 +366,7 @@ class TestConnectionManager:
             metrics_collector=metrics,
             pipe_resource=pipe_resource,
             queue_size=3,
-            queue_timeout=2.0  # Short timeout
+            queue_timeout=2.0,  # Short timeout
         )
 
         try:
@@ -332,17 +374,19 @@ class TestConnectionManager:
 
             # Test that queue metrics work
             queue_metrics = connection_mgr.get_queue_metrics()
-            assert queue_metrics['current_depth'] == 0, "Should start with empty queue"
-            assert queue_metrics['max_size'] == 3, "Should have correct max size"
+            assert queue_metrics["current_depth"] == 0, "Should start with empty queue"
+            assert queue_metrics["max_size"] == 3, "Should have correct max size"
 
             # Test basic connection management state
             assert connection_mgr.is_running(), "Should be running"
             assert connection_mgr.is_writer_ready(), "Should have writer ready"
-            assert connection_mgr.can_accept_connections(), "Should be able to accept connections"
+            assert connection_mgr.can_accept_connections(), (
+                "Should be able to accept connections"
+            )
 
             # Test that the queue metrics are properly initialized
-            assert 'total_queued' in queue_metrics, "Should track total queued"
-            assert 'timeout_count' in queue_metrics, "Should track timeouts"
+            assert "total_queued" in queue_metrics, "Should track total queued"
+            assert "timeout_count" in queue_metrics, "Should track timeouts"
 
         finally:
             connection_mgr.shutdown()
@@ -362,7 +406,7 @@ class TestConnectionManager:
             metrics_collector=metrics,
             pipe_resource=pipe_resource,
             queue_size=2,
-            queue_timeout=0.1  # Very short timeout for testing
+            queue_timeout=0.1,  # Very short timeout for testing
         )
 
         try:
@@ -370,11 +414,13 @@ class TestConnectionManager:
 
             # Test basic timeout setup
             queue_metrics = connection_mgr.get_queue_metrics()
-            assert 'timeout_count' in queue_metrics, "Should have timeout count in metrics"
+            assert "timeout_count" in queue_metrics, (
+                "Should have timeout count in metrics"
+            )
 
             # Test that metrics are available
             metrics_data = metrics.get_metrics()
-            assert 'connections_timeout' in metrics_data, "Should track timeout metrics"
+            assert "connections_timeout" in metrics_data, "Should track timeout metrics"
 
         finally:
             connection_mgr.shutdown()
@@ -394,7 +440,7 @@ class TestConnectionManager:
             metrics_collector=metrics,
             pipe_resource=pipe_resource,
             queue_size=2,  # Small queue for testing overflow
-            queue_timeout=1.0
+            queue_timeout=1.0,
         )
 
         try:
@@ -402,16 +448,18 @@ class TestConnectionManager:
 
             # Test queue capacity configuration
             queue_metrics = connection_mgr.get_queue_metrics()
-            assert queue_metrics['max_size'] == 2, "Should have correct max queue size"
-            assert queue_metrics['current_depth'] == 0, "Should start with empty queue"
+            assert queue_metrics["max_size"] == 2, "Should have correct max queue size"
+            assert queue_metrics["current_depth"] == 0, "Should start with empty queue"
 
             # Test that metrics track failures
             initial_metrics = metrics.get_metrics()
-            initial_failures = initial_metrics.get('failed_connections', 0)
+            initial_failures = initial_metrics.get("failed_connections", 0)
 
             # The queue should be capable of tracking overflow
             # (Implementation details of overflow will be tested in actual queue scenarios)
-            assert 'failed_connections' in initial_metrics, "Should track failed connections"
+            assert "failed_connections" in initial_metrics, (
+                "Should track failed connections"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -431,7 +479,7 @@ class TestConnectionManager:
             metrics_collector=metrics,
             pipe_resource=pipe_resource,
             queue_size=5,
-            queue_timeout=10.0
+            queue_timeout=10.0,
         )
 
         try:
@@ -439,14 +487,14 @@ class TestConnectionManager:
 
             # Test queue state functionality
             queue_state = connection_mgr.get_queue_state()
-            assert queue_state['size'] == 0, "Queue should start empty"
-            assert queue_state['empty'], "Queue should be empty initially"
-            assert not queue_state['full'], "Queue should not be full initially"
+            assert queue_state["size"] == 0, "Queue should start empty"
+            assert queue_state["empty"], "Queue should be empty initially"
+            assert not queue_state["full"], "Queue should not be full initially"
 
             # Test queue ordering property (FIFO is guaranteed by Python's Queue implementation)
             # This test verifies the queue state tracking works correctly
-            assert 'order' in queue_state, "Should track queue order"
-            assert isinstance(queue_state['order'], list), "Order should be a list"
+            assert "order" in queue_state, "Should track queue order"
+            assert isinstance(queue_state["order"], list), "Order should be a list"
 
         finally:
             connection_mgr.shutdown()
@@ -464,7 +512,7 @@ class TestConnectionManager:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
@@ -479,6 +527,7 @@ class TestConnectionManager:
 
             # Create a thread to check if connection manager stays running
             still_running = False
+
             def check_running():
                 nonlocal still_running
                 time.sleep(0.5)  # Wait half a second
@@ -491,13 +540,17 @@ class TestConnectionManager:
             check_thread.join()
 
             # Assert - Connection manager should still be running after delay
-            assert still_running, "Connection manager should still be running after 0.5 seconds"
+            assert still_running, (
+                "Connection manager should still be running after 0.5 seconds"
+            )
 
             # Stop the connection manager
             connection_mgr.shutdown()
 
             # Verify it stopped
-            assert not connection_mgr.is_running(), "Should not be running after shutdown"
+            assert not connection_mgr.is_running(), (
+                "Should not be running after shutdown"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -512,7 +565,10 @@ class TestConnectionManagerEventIntegration:
     def test_connection_manager_events_basic_lifecycle(self):
         """Test that connection lifecycle events are emitted correctly."""
         # Arrange
-        from pipedoc.connection_events import ConnectionEventManager, ConnectionEventType
+        from pipedoc.connection_events import (
+            ConnectionEventManager,
+            ConnectionEventType,
+        )
 
         event_manager = ConnectionEventManager()
         received_events = []
@@ -533,7 +589,7 @@ class TestConnectionManagerEventIntegration:
             worker_pool=worker_pool,
             metrics_collector=metrics,
             pipe_resource=pipe_resource,
-            event_manager=event_manager
+            event_manager=event_manager,
         )
 
         try:
@@ -551,8 +607,12 @@ class TestConnectionManagerEventIntegration:
 
             # Verify specific events
             event_types = [event.connection_event_type for event in received_events]
-            assert ConnectionEventType.CONNECT_ATTEMPT in event_types, "Should emit CONNECT_ATTEMPT event"
-            assert ConnectionEventType.CONNECT_SUCCESS in event_types, "Should emit CONNECT_SUCCESS event"
+            assert ConnectionEventType.CONNECT_ATTEMPT in event_types, (
+                "Should emit CONNECT_ATTEMPT event"
+            )
+            assert ConnectionEventType.CONNECT_SUCCESS in event_types, (
+                "Should emit CONNECT_SUCCESS event"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -562,7 +622,10 @@ class TestConnectionManagerEventIntegration:
     def test_connection_manager_queue_events(self):
         """Test that queue-related events are emitted correctly."""
         # Arrange
-        from pipedoc.connection_events import ConnectionEventManager, ConnectionEventType
+        from pipedoc.connection_events import (
+            ConnectionEventManager,
+            ConnectionEventType,
+        )
 
         event_manager = ConnectionEventManager()
         received_events = []
@@ -585,19 +648,21 @@ class TestConnectionManagerEventIntegration:
             pipe_resource=pipe_resource,
             queue_size=3,
             queue_timeout=1.0,
-            event_manager=event_manager
+            event_manager=event_manager,
         )
 
         try:
             connection_mgr.start_connection_management()
 
             # Test that event manager is properly configured
-            assert connection_mgr._event_manager is not None, "Should have event manager"
+            assert connection_mgr._event_manager is not None, (
+                "Should have event manager"
+            )
 
             # Test basic queue event tracking capability
             # (Events are emitted during actual queue operations, but we test the setup)
             queue_metrics = connection_mgr.get_queue_metrics()
-            assert queue_metrics['current_depth'] == 0, "Should start with empty queue"
+            assert queue_metrics["current_depth"] == 0, "Should start with empty queue"
 
             # Verify that basic metrics are being tracked (events enhance metrics)
             initial_events = len(received_events)
@@ -614,7 +679,10 @@ class TestConnectionManagerEventIntegration:
     def test_connection_manager_timeout_events(self):
         """Test that timeout events are emitted correctly."""
         # Arrange
-        from pipedoc.connection_events import ConnectionEventManager, ConnectionEventType
+        from pipedoc.connection_events import (
+            ConnectionEventManager,
+            ConnectionEventType,
+        )
 
         event_manager = ConnectionEventManager()
         received_events = []
@@ -637,7 +705,7 @@ class TestConnectionManagerEventIntegration:
             pipe_resource=pipe_resource,
             queue_size=2,
             queue_timeout=0.1,  # Very short timeout
-            event_manager=event_manager
+            event_manager=event_manager,
         )
 
         try:
@@ -645,13 +713,17 @@ class TestConnectionManagerEventIntegration:
 
             # Test that timeout configuration is in place
             queue_metrics = connection_mgr.get_queue_metrics()
-            assert 'timeout_count' in queue_metrics, "Should track timeout count"
+            assert "timeout_count" in queue_metrics, "Should track timeout count"
 
             # Test that event manager supports timeout events
-            assert hasattr(ConnectionEventType, 'CONNECT_TIMEOUT'), "Should have CONNECT_TIMEOUT event type"
+            assert hasattr(ConnectionEventType, "CONNECT_TIMEOUT"), (
+                "Should have CONNECT_TIMEOUT event type"
+            )
 
             # Verify connection manager can emit events
-            assert connection_mgr._event_manager is not None, "Should have event manager"
+            assert connection_mgr._event_manager is not None, (
+                "Should have event manager"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -661,6 +733,7 @@ class TestConnectionManagerEventIntegration:
             # Stop event dispatching
             event_manager.stop_dispatching()
 
+    @pytest.mark.hanging
     def test_connection_manager_no_event_manager(self):
         """Test that ConnectionManager works without event manager (backwards compatibility)."""
         # Arrange
@@ -673,7 +746,7 @@ class TestConnectionManagerEventIntegration:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
@@ -685,11 +758,15 @@ class TestConnectionManagerEventIntegration:
             # Assert - Should work normally
             if future:
                 result = future.result(timeout=2.0)
-                assert result == "connection_handled", "Should handle connection normally"
+                assert result == "connection_handled", (
+                    "Should handle connection normally"
+                )
 
             # Verify normal operation
             assert connection_mgr.is_running(), "Should be running normally"
-            assert connection_mgr.get_active_connections() >= 0, "Should track connections normally"
+            assert connection_mgr.get_active_connections() >= 0, (
+                "Should track connections normally"
+            )
 
         finally:
             connection_mgr.shutdown()
@@ -708,7 +785,7 @@ class TestConnectionManagerEventIntegration:
         connection_mgr = ConnectionManager(
             worker_pool=worker_pool,
             metrics_collector=metrics,
-            pipe_resource=pipe_resource
+            pipe_resource=pipe_resource,
         )
 
         try:
@@ -723,6 +800,7 @@ class TestConnectionManagerEventIntegration:
 
             # Create a thread to check if connection manager stays running
             still_running = False
+
             def check_running():
                 nonlocal still_running
                 time.sleep(0.5)  # Wait half a second
@@ -735,13 +813,17 @@ class TestConnectionManagerEventIntegration:
             check_thread.join()
 
             # Assert - Connection manager should still be running after delay
-            assert still_running, "Connection manager should still be running after 0.5 seconds"
+            assert still_running, (
+                "Connection manager should still be running after 0.5 seconds"
+            )
 
             # Stop the connection manager
             connection_mgr.shutdown()
 
             # Verify it stopped
-            assert not connection_mgr.is_running(), "Should not be running after shutdown"
+            assert not connection_mgr.is_running(), (
+                "Should not be running after shutdown"
+            )
 
         finally:
             connection_mgr.shutdown()

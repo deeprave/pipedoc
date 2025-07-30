@@ -19,7 +19,7 @@ from pipedoc.server import MarkdownPipeServer
 def create_demo_docs(temp_dir: Path):
     """Create demo documentation files."""
     print("Creating demo documentation structure...")
-    
+
     # Project README
     readme = temp_dir / "README.md"
     readme.write_text("""# My Awesome Project
@@ -39,11 +39,11 @@ This project showcases:
 
 See the user guide for detailed instructions.
 """)
-    
+
     # Create docs directory
     docs_dir = temp_dir / "docs"
     docs_dir.mkdir()
-    
+
     # Installation guide
     install = docs_dir / "installation.md"
     install.write_text("""# Installation Guide
@@ -78,7 +78,7 @@ To verify the installation worked:
 python -c "import myproject; print('Success!')"
 ```
 """)
-    
+
     # User guide
     guide = docs_dir / "user-guide.markdown"
     guide.write_text("""# User Guide
@@ -123,11 +123,11 @@ myproject start --config config.yaml
 **Issue**: Port already in use
 **Solution**: Use a different port with `--port` option
 """)
-    
+
     # API documentation
     api_dir = docs_dir / "api"
     api_dir.mkdir()
-    
+
     api = api_dir / "reference.mdown"
     api.write_text("""# API Reference
 
@@ -197,7 +197,7 @@ Validate configuration dictionary.
 
 Load data from file.
 """)
-    
+
     print("✓ Demo documentation created")
     return [readme, install, guide, api]
 
@@ -205,36 +205,36 @@ Load data from file.
 def main():
     """Run the demo."""
     print("=== Pipedoc Demo ===\n")
-    
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        
+
         # Create demo documentation
         create_demo_docs(temp_path)
-        
+
         # Create and run server (content preparation only)
         print("\nInitializing pipedoc server...")
         server = MarkdownPipeServer(str(temp_path))
-        
+
         print("Validating setup...")
         server.validate_setup()
-        
+
         print("Preparing content...")
         content = server.prepare_content()
-        
-        print("\n" + "="*80)
+
+        print("\n" + "=" * 80)
         print("DEMO: This is what would be served through the named pipe:")
-        print("="*80)
-        
+        print("=" * 80)
+
         # Show first 2000 characters of the content
         preview = content[:2000]
         print(preview)
-        
+
         if len(content) > 2000:
             print(f"\n... (truncated, full content is {len(content)} characters)")
-        
-        print("\n" + "="*80)
-        
+
+        print("\n" + "=" * 80)
+
         # Show statistics
         stats = server.get_content_stats()
         print(f"\nContent Statistics:")
@@ -242,20 +242,20 @@ def main():
         print(f"  Lines: {stats['line_count']}")
         print(f"  Words: {stats['word_count']}")
         print(f"  Characters (no whitespace): {stats['character_count']}")
-        
+
         print(f"\nIn a real scenario:")
         print(f"1. The server would create a named pipe (e.g., /tmp/pipedoc_12345)")
         print(f"2. Multiple processes could read from this pipe simultaneously")
         print(f"3. Each reader would get the complete concatenated content")
         print(f"4. The server would handle multiple clients with threading")
-        
+
         print(f"\nTo use this in practice:")
         print(f"  Terminal 1: pipedoc {temp_path}")
         print(f"  Terminal 2: cat /tmp/pipedoc_12345")
         print(f"  Terminal 3: less /tmp/pipedoc_12345")
-        
+
         server.cleanup()
-        
+
         print(f"\n🎉 Demo completed successfully!")
 
 

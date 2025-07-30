@@ -23,3 +23,7 @@ uv.toml
 .idea/
 .claude/
 /CLAUDE.md
+Writerside/
+tasks/
+
+*.log

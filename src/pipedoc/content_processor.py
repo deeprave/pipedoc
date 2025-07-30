@@ -8,7 +8,7 @@ on reading file contents and formatting them for output.
 from pathlib import Path
 from typing import List, Optional
 
-from pipedoc.event_system import StructuredLogger
+from pipedoc.app_logger import get_default_logger, LogContext
 
 
 class ContentProcessor:
@@ -27,7 +27,8 @@ class ContentProcessor:
             base_directory: The root directory for relative path calculations
         """
         self.base_directory = Path(base_directory).expanduser().resolve()
-        self._logger = StructuredLogger("ContentProcessor")
+        self._logger = get_default_logger()
+        self._log_context = LogContext(component="ContentProcessor")
 
     def read_file_content(self, file_path: str) -> Optional[str]:
         """
@@ -43,7 +44,12 @@ class ContentProcessor:
             with open(file_path, encoding="utf-8") as f:
                 return f.read()
         except (OSError, UnicodeDecodeError) as e:
-            self._logger.error("Error reading file", file_path=file_path, error=str(e))
+            self._logger.error(
+                "Error reading file",
+                context=self._log_context,
+                file_path=file_path,
+                error=str(e),
+            )
             return None
 
     def create_file_separator(self, file_path: str) -> str:
@@ -96,11 +102,17 @@ class ContentProcessor:
         if not file_paths:
             return ""
 
-        self._logger.info("Processing markdown files", file_count=len(file_paths))
+        self._logger.info(
+            "Processing markdown files",
+            context=self._log_context,
+            file_count=len(file_paths),
+        )
         content_parts = []
 
         for file_path in file_paths:
-            self._logger.debug("Processing file", file_path=file_path)
+            self._logger.debug(
+                "Processing file", context=self._log_context, file_path=file_path
+            )
             processed_content = self.process_file(file_path)
 
             if processed_content is not None:

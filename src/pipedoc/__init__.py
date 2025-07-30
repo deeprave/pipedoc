@@ -16,6 +16,9 @@ from .pipe_manager import PipeManager
 from .server import MarkdownPipeServer
 
 __all__ = [
+    "__version__",
+    "__author__",
+    "__email__",
     "ContentProcessor",
     "MarkdownFileFinder",
     "MarkdownPipeServer",
